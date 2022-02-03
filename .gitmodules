@@ -1,3 +1,6 @@
 [submodule "themes/jeffprod"] 
   path = themes/jeffprod 
   url = https://github.com/Tazeg/hugo-blog-jeffprod.git
+[submodule "themes/hugo-theme-stack"]
+  path = themes/hugo-theme-stack
+  url = https://github.com/CaiJimmy/hugo-theme-stack.git
