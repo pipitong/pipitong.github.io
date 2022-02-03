@@ -2,6 +2,16 @@
 &amp;hellip; How to create this blog site: Hugo, the world&amp;rsquo;s fastest framework for building websites.
 使用 Hugo 搭建个人网站（博客、个人主页）并发布到 Github 上
 hugo-theme-stack
-doc for hugo-theme-stack</description></item><item><title>Archives</title><link>https://example.com/archives/</link><pubDate>Tue, 28 May 2019 00:00:00 +0000</pubDate><guid>https://example.com/archives/</guid><description/></item><item><title>Links</title><link>https://example.com/links/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://example.com/links/</guid><description>To use this feature, add links section to frontmatter.
-This page&amp;rsquo;s frontmatter:
-links:- title:GitHubdescription:GitHub is the world&amp;#39;s largest software development platform.website:https://github.comimage:https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png- title:TypeScriptdescription:TypeScript is a typed superset of JavaScript that compiles to plain JavaScript.website:https://www.typescriptlang.orgimage:ts-logo-128.jpgimage field accepts both local and external images.</description></item><item><title>Search</title><link>https://example.com/search/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://example.com/search/</guid><description/></item></channel></rss>
+doc for hugo-theme-stack</description></item><item><title>Archives</title><link>https://example.com/archives/</link><pubDate>Thu, 03 Feb 2022 00:00:00 +0000</pubDate><guid>https://example.com/archives/</guid><description/></item><item><title>Links</title><link>https://example.com/links/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://example.com/links/</guid><description>My favourite links Bilibili
+知乎
+已学会的游戏列表： koikoi 日本花牌
+有待学习的游戏列表： kingdombuilder
+seasons
+castlesofburgundy
+diceforge
+harbour
+monsterfactory
+bigtimesoccer
+origin
+icebreaker
+&amp;hellip;.</description></item><item><title>Search</title><link>https://example.com/search/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://example.com/search/</guid><description/></item></channel></rss>
