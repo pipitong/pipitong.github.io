@@ -38,7 +38,7 @@ params:
         lastUpdated: Jan 02, 2006 15:04 MST
 
     sidebar:
-        emoji: 🍥
+        emoji: 🌟
         subtitle: Lorem ipsum dolor sit amet, consectetur adipiscing elit.
         avatar:
             enabled: true
@@ -220,4 +220,3 @@ markup:
     highlight:
         noClasses: false
         
-timeout : 60000

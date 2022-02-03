@@ -2,14 +2,20 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
   xmlns:xhtml="http://www.w3.org/1999/xhtml">
   <url>
+    <loc>https://example.com/about/</loc>
+    <lastmod>2022-02-03T00:00:00+00:00</lastmod>
+  </url><url>
+    <loc>https://example.com/</loc>
+    <lastmod>2022-02-03T00:00:00+00:00</lastmod>
+  </url><url>
+    <loc>https://example.com/page/</loc>
+    <lastmod>2022-02-03T00:00:00+00:00</lastmod>
+  </url><url>
     <loc>https://example.com/categories/</loc>
     <lastmod>2020-09-09T00:00:00+00:00</lastmod>
   </url><url>
     <loc>https://example.com/p/test-chinese/</loc>
     <lastmod>2020-09-09T00:00:00+00:00</lastmod>
-  </url><url>
-    <loc>https://example.com/</loc>
-    <lastmod>2020-10-09T00:00:00+00:00</lastmod>
   </url><url>
     <loc>https://example.com/post/</loc>
     <lastmod>2020-09-09T00:00:00+00:00</lastmod>
@@ -22,9 +28,6 @@
   </url><url>
     <loc>https://example.com/archives/</loc>
     <lastmod>2019-05-28T00:00:00+00:00</lastmod>
-  </url><url>
-    <loc>https://example.com/page/</loc>
-    <lastmod>2020-10-09T00:00:00+00:00</lastmod>
   </url><url>
     <loc>https://example.com/tags/css/</loc>
     <lastmod>2019-03-11T00:00:00+00:00</lastmod>
@@ -79,9 +82,6 @@
   </url><url>
     <loc>https://example.com/p/emoji-support/</loc>
     <lastmod>2019-03-05T00:00:00+00:00</lastmod>
-  </url><url>
-    <loc>https://example.com/about/</loc>
-    <lastmod>2020-10-09T00:00:00+00:00</lastmod>
   </url><url>
     <loc>https://example.com/links/</loc>
   </url><url>
