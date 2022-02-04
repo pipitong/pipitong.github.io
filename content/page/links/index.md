@@ -26,7 +26,9 @@ comments: false
 # My favourite links
 [Bilibili](https://github.com/)  
 [知乎](https://www.zhihu.com/)  
-
+[口语-赖世雄](https://www.youtube.com/watch?v=BO_xnZOgCGY&list=PLPQT_l4rJ8CDHEr550NJmgO3_rrVo_EoB)  
+[口语-Paul](https://www.bilibili.com/video/BV1n54y1B7bE?spm_id_from=333.999.0.0)  
+[Rachel-Sounds of American English Course](https://www.youtube.com/watch?v=p1SRYnumsBE&list=PLB043E64B8BE05FB7&index=1)
 
 # 已学会的游戏列表：
 [koikoi 日本花牌](https://boardgamearena.com/gamepanel?game=koikoi)  
