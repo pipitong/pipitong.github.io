@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>那个每天让我们丢数据的 Bug：Redis 滑动窗口限流实践</title>
+  <meta name="description" content="多个 Prefect worker 各自维护内存计数，Binance 实际收到的请求远超 weight 上限，引发 429 和每日数据缺口。用 Redis sorted set + Lua script 实现跨进程原子滑动窗口，缺口归零。" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../css/style.css" />
+  <!-- highlight.js -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script>hljs.highlightAll();</script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <h1 class="site-title"><a href="../index.html">Tongtong Zhao</a></h1>
+      <nav class="nav">
+        <a href="../index.html#series">系列</a>
+        <a href="../index.html#articles">文章</a>
+        <a href="../index.html#tech">技术栈</a>
+        <a href="../about/">About</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <div class="article-layout">
+
+      <!-- Main content -->
+      <div class="article-content">
+        <a href="../index.html#articles" class="back-link">← 返回文章列表</a>
+
+        <article>
+          <header class="article-header">
+            <div class="article-meta-row" style="margin-bottom: 0.5rem;">
+              <span class="series-label">系列：量化数据基础设施从零到生产 · #3</span>
+            </div>
+            <h1>那个每天让我们丢数据的 Bug：Redis 滑动窗口限流实践</h1>
+            <div class="article-meta-row">
+              <span>2025-11</span>
+              <span class="sep">·</span>
+              <span>约 9 分钟</span>
+              <span class="sep">·</span>
+              <span>Redis · Rate Limit · Binance · 可靠性</span>
+            </div>
+          </header>
+
+          <div class="article-body">
+
+            <div class="recruiter-tldr">
+              <p><strong>给招聘方 / 非技术面试官：</strong> 交易所对 API 请求有频率限制（类似「每分钟只能问 2400 次」）。我们的系统有多个并发工作进程，每个进程各自计数，导致实际发出的请求数是限制的好几倍，交易所返回错误，数据就缺了。</p>
+              <p>这篇文章记录了怎么发现这个 Bug、为什么会发生、以及用 Redis 做一个「所有进程共享的计数器」来修复它。<strong>修复后，每日数据缺口归零。</strong></p>
+            </div>
+
+            <h2 id="background">背景：我们的数据采集系统</h2>
+            <p>系统的核心结构很简单：针对每个交易所的每种数据类型，部署一个 Prefect flow，按固定间隔拉取数据写入 ClickHouse。生产环境里 Binance 相关的 flow 大约有十几个，覆盖 K 线、资金费率、持仓量、多空比等数据类型，每个 flow 独立调度。</p>
+            <p>Binance 的 API 有严格的 weight 配额制度——下文会详细说——我们当时在每个 flow 里各自做了限流处理，看起来没什么问题。</p>
+
+            <h2 id="problem">发现问题：数据仪表盘上的「缺口」</h2>
+            <p>某天有人注意到 ClickHouse 里 Binance K 线数据在每天凌晨 0 点前后有一段明显的空缺，持续约 10 到 20 分钟。仔细一查，这个缺口几乎每天都有，时间点高度稳定。</p>
+            <p>第一反应是网络抖动，但看了一下机器日志，网络没有异常。再翻 Prefect 的运行日志，发现了这些：</p>
+            <pre><code class="language-text">2025-10-14 00:02:33 WARNING HTTP 429: Too Many Requests
+2025-10-14 00:02:33 WARNING Retry after: 30s
+2025-10-14 00:02:35 WARNING HTTP 429: Too Many Requests
+2025-10-14 00:02:37 ERROR HTTP 418: IP Banned (duration: 120s)</code></pre>
+            <p>429 是 Binance 的「请求过多」，418 是 IP 封禁。每天凌晨恰好有多个 flow 同时触发定时拉取，并发度在那个时间点最高，触发了 over-quota。</p>
+
+            <h2 id="root-cause">根本原因：in-memory 计数器不跨进程</h2>
+            <p>问题出在我们的限流实现上。当时每个 Prefect flow 里有一个这样的限流器：</p>
+            <span class="code-label">❌ 有问题的实现（每个进程各自维护计数）</span>
+            <pre><code class="language-python">import time
+from threading import Lock
+
+class InMemoryRateLimiter:
+    def __init__(self, limit: int, window: int = 60):
+        self.limit = limit
+        self.window = window
+        self._requests: list[float] = []
+        self._lock = Lock()
+
+    def acquire(self, weight: int = 1) -> None:
+        with self._lock:
+            now = time.time()
+            # 清理窗口外的记录
+            self._requests = [t for t in self._requests if now - t < self.window]
+            if len(self._requests) + weight > self.limit:
+                wait = self._requests[0] + self.window - now
+                time.sleep(max(0, wait))
+                self._requests = []
+            self._requests.extend([now] * weight)</code></pre>
+
+            <p>这个实现在单进程里没有问题。问题是：<strong>Prefect 的每个 flow run 是独立进程</strong>，各自有一份内存，互相看不到对方的计数。</p>
+            <p>假设 Binance 的限制是 2400 weight/min，我们同时跑了 5 个 flow，每个都觉得自己能用 2400 weight——实际上 Binance 收到的请求是 5 × 2400 = <strong>12000 weight</strong>，是限制的 5 倍。</p>
+
+            <pre><code class="language-text">Worker 1: 认为已用 400/2400 → 继续发请求
+Worker 2: 认为已用 350/2400 → 继续发请求
+Worker 3: 认为已用 500/2400 → 继续发请求
+Worker 4: 认为已用 280/2400 → 继续发请求
+Worker 5: 认为已用 420/2400 → 继续发请求
+─────────────────────────────────────────────
+Binance 实际收到:   1950 weight → 还没到上限
+（下一分钟并发高峰）
+─────────────────────────────────────────────
+Binance 实际收到: ~3100 weight → 429 → 418</code></pre>
+
+            <p>更坏的是这个 Bug 是「静默失效」的——低并发时 5 个 worker 加起来也不超限，一旦并发高（比如每天定时任务同时触发），就会爆。问题定时出现，很难在本地复现。</p>
+
+            <h2 id="binance-weight">Binance Weight 系统详解</h2>
+            <p>在讲解法之前，先说清楚 Binance 的限流机制，因为这直接决定了我们要计数什么。</p>
+            <p>Binance API 不是简单地「每分钟最多 N 个请求」，而是 <strong>weight 配额制</strong>：每个 endpoint 消耗不同的 weight，每分钟有一个全局 weight 上限。</p>
+
+            <table style="width:100%; border-collapse:collapse; font-size:0.85rem; margin: 1rem 0;">
+              <thead>
+                <tr style="border-bottom: 1px solid var(--border); text-align:left;">
+                  <th style="padding:0.5rem 0.75rem; color:var(--text-muted);">Endpoint</th>
+                  <th style="padding:0.5rem 0.75rem; color:var(--text-muted);">Weight</th>
+                  <th style="padding:0.5rem 0.75rem; color:var(--text-muted);">说明</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style="border-bottom: 1px solid var(--border);">
+                  <td style="padding:0.5rem 0.75rem; font-family:var(--font-mono); font-size:0.8rem;">GET /api/v3/klines (limit≤100)</td>
+                  <td style="padding:0.5rem 0.75rem;">1</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">最常用，尽量用这个 limit</td>
+                </tr>
+                <tr style="border-bottom: 1px solid var(--border);">
+                  <td style="padding:0.5rem 0.75rem; font-family:var(--font-mono); font-size:0.8rem;">GET /api/v3/klines (limit 101-500)</td>
+                  <td style="padding:0.5rem 0.75rem;">2</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);"></td>
+                </tr>
+                <tr style="border-bottom: 1px solid var(--border);">
+                  <td style="padding:0.5rem 0.75rem; font-family:var(--font-mono); font-size:0.8rem;">GET /api/v3/klines (limit 501-1000)</td>
+                  <td style="padding:0.5rem 0.75rem;">5</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);"></td>
+                </tr>
+                <tr style="border-bottom: 1px solid var(--border);">
+                  <td style="padding:0.5rem 0.75rem; font-family:var(--font-mono); font-size:0.8rem;">GET /api/v3/exchangeInfo</td>
+                  <td style="padding:0.5rem 0.75rem;">20</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">别频繁调</td>
+                </tr>
+                <tr>
+                  <td style="padding:0.5rem 0.75rem; font-family:var(--font-mono); font-size:0.8rem;">全局上限（/api endpoints）</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--accent); font-weight:600;">2400/min</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">滚动窗口</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <p>响应头 <code>X-MBX-USED-WEIGHT-1M</code> 会返回当前已用 weight，超过 2400 会收到 429，短时间内继续触发会收到 418（IP 级封禁，持续数分钟到数小时）。</p>
+            <p>这意味着我们需要计数的不是「请求次数」，而是 <strong>weight 总量</strong>，并且这个计数必须在所有 worker 之间共享。</p>
+
+            <h2 id="solution">解决方案：Redis sorted set 滑动窗口</h2>
+
+            <h3 id="why-redis">为什么选 Redis sorted set</h3>
+            <p>有几种备选方案：</p>
+            <ul>
+              <li><strong>简单 sleep</strong>：不精确，大量时间浪费在等待上，吞吐量差。</li>
+              <li><strong>固定窗口计数器（Redis INCR）</strong>：在窗口边界处会有「突刺」——上一个窗口的末尾和下一个窗口的开头叠加，实际速率是 2× 上限。</li>
+              <li><strong>Redis sorted set 滑动窗口</strong>：精确计算过去 60 秒内的 weight 消耗，无突刺，天然支持跨进程共享。</li>
+            </ul>
+            <p>sorted set 的思路：以时间戳为 score，每次请求往 set 里写入 weight 个条目；查询时先删掉 60 秒前的旧条目，再 ZCARD 得到当前窗口的 weight 用量。整个操作用 Lua script 保证原子性。</p>
+
+            <h3 id="implementation">实现</h3>
+            <span class="code-label">✅ 修复后：Redis sorted set 原子滑动窗口</span>
+            <pre><code class="language-python">import time
+import redis
+
+# Lua script：原子执行「删旧 + 计数 + 写入」，避免竞态
+_LUA_ACQUIRE = """
+local key        = KEYS[1]
+local now_ms     = tonumber(ARGV[1])
+local window_ms  = tonumber(ARGV[2])
+local limit      = tonumber(ARGV[3])
+local weight     = tonumber(ARGV[4])
+
+-- 删除窗口外的旧条目
+redis.call('ZREMRANGEBYSCORE', key, 0, now_ms - window_ms)
+
+-- 当前已用 weight
+local used = redis.call('ZCARD', key)
+
+if used + weight > limit then
+    -- 返回最旧条目的时间戳（用于计算需要等多久）
+    local oldest = redis.call('ZRANGE', key, 0, 0, 'WITHSCORES')
+    if #oldest > 0 then
+        return tonumber(oldest[2])
+    end
+    return now_ms
+end
+
+-- 写入本次请求的 weight 个条目（score = 时间戳，member 唯一）
+for i = 1, weight do
+    redis.call('ZADD', key, now_ms, now_ms .. ':' .. i .. ':' .. tostring(math.random(1e9)))
+end
+
+-- 自动过期，比窗口略长即可
+redis.call('PEXPIRE', key, window_ms + 2000)
+
+return 0  -- 0 表示可以立即发请求
+"""
+
+
+class RedisRateLimiter:
+    """
+    跨进程/跨线程的原子滑动窗口限流器。
+    所有 Prefect worker 共享同一个 Redis key，共享同一个 weight 池。
+    """
+
+    def __init__(
+        self,
+        r: redis.Redis,
+        key: str,           # 如 "binance:api:weight"
+        limit: int,         # 如 2400（weight/min）
+        window_ms: int = 60_000,
+    ):
+        self.r = r
+        self.key = key
+        self.limit = limit
+        self.window_ms = window_ms
+        self._script = r.register_script(_LUA_ACQUIRE)
+
+    def acquire(self, weight: int = 1) -> None:
+        """阻塞直到可以发出 weight 个单位的请求。"""
+        while True:
+            now_ms = int(time.time() * 1000)
+            result = self._script(
+                keys=[self.key],
+                args=[now_ms, self.window_ms, self.limit, weight],
+            )
+            if result == 0:
+                return  # 拿到配额，可以发请求
+
+            # result 是最旧条目的时间戳（ms），等它过期
+            oldest_ms = float(result)
+            wait_s = max(0.05, (oldest_ms + self.window_ms - now_ms) / 1000)
+            time.sleep(wait_s)</code></pre>
+
+            <h3 id="usage">集成到 fetcher</h3>
+            <span class="code-label">在 Prefect flow 里使用（所有 flow 共享同一个 limiter key）</span>
+            <pre><code class="language-python">import redis
+from prefect import flow, task
+
+# 全局 Redis 连接（可以用 Prefect Block 管理）
+_redis = redis.Redis(host="redis-host", port=6379, decode_responses=True)
+
+# 所有 Binance flow 共用同一个 key → 共用同一个 weight 池
+BINANCE_LIMITER = RedisRateLimiter(
+    r=_redis,
+    key="binance:api:weight",
+    limit=2200,        # 留 200 buffer，不打满
+    window_ms=60_000,
+)
+
+@task
+def fetch_klines(symbol: str, interval: str, limit: int = 100) -> list:
+    weight = 1  # limit <= 100 → weight=1
+    BINANCE_LIMITER.acquire(weight=weight)
+
+    resp = requests.get(
+        "https://api.binance.com/api/v3/klines",
+        params={"symbol": symbol, "interval": interval, "limit": limit},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return resp.json()</code></pre>
+
+            <h2 id="result">结果</h2>
+            <p>部署后的第二天，数据仪表盘上的缺口消失了。之后观察了两周，<strong>429 错误归零，数据完整率 100%</strong>。</p>
+            <p>改动带来的副作用是整体吞吐量稍有下降——因为现在是真实的全局限流，不再有「各自多报配额」的意外超发。但这是预期内的，也是正确的状态。</p>
+
+            <h2 id="extension">扩展：其他交易所的限流特点</h2>
+            <p>修完 Binance 之后，我们把其他交易所的限流也统一收进了这套机制，顺便整理了各家的差异：</p>
+            <ul>
+              <li><strong>OKX</strong>：按 endpoint 分别限流（每个 endpoint 独立的 req/s 上限），而不是全局 weight；限流粒度更细，需要为每个 endpoint 维护独立 key。</li>
+              <li><strong>Bybit</strong>：按 category（linear/spot/option）分别有 limit，同一 category 下的 endpoint 共享配额；和 Binance 类似但分了 namespace。</li>
+              <li><strong>KuCoin</strong>：<code>pool = 2000 weight / 30s</code>，每个 candle 请求消耗 weight=3，单 IP 上限约 22 req/s；我们用 32 个 SOCKS5 代理，每个代理有独立的 IP 配额，吞吐从 22 req/s 扩展到约 710 req/s。</li>
+            </ul>
+            <p>把每个交易所的 rate limit key 注册到同一套 <code>RedisRateLimiter</code> 下，所有 flow 在发请求前统一 <code>acquire()</code>，是最干净的架构。</p>
+
+            <div class="interview-one-liner">
+              <strong>面试一句话：</strong> 发现多个 Prefect worker 各自维护内存计数，导致 Binance weight 超配额，产生 429/418 和每日数据缺口；用 Redis sorted set + Lua script 实现跨进程原子滑动窗口，所有 worker 共享一个全局 weight 池，缺口归零。
+            </div>
+
+          </div><!-- /article-body -->
+        </article>
+
+        <!-- Series navigation -->
+        <nav class="series-nav" aria-label="系列导航">
+          <a href="from-zero-data-pipeline.html" class="series-nav-item prev">
+            <div class="nav-direction">← 上一篇</div>
+            <div class="nav-title">从零搭建线上数据管道：需求、架构与表设计</div>
+          </a>
+          <div class="series-nav-item next placeholder" aria-hidden="true"></div>
+          <!-- 下一篇写好后替换 placeholder：
+          <a href="proxy-pool-bulk-ingestion.html" class="series-nav-item next">
+            <div class="nav-direction">下一篇 →</div>
+            <div class="nav-title">历史数据 10 亿行，45 分钟完成：代理池与并发设计</div>
+          </a>
+          -->
+        </nav>
+
+      </div><!-- /article-content -->
+
+      <!-- TOC sidebar -->
+      <aside class="article-toc">
+        <div class="toc">
+          <div class="toc-title">目录</div>
+          <ul class="toc-list">
+            <li><a href="#background">背景：采集系统</a></li>
+            <li><a href="#problem">发现问题：数据缺口</a></li>
+            <li><a href="#root-cause">根本原因</a></li>
+            <li><a href="#binance-weight">Binance Weight 详解</a></li>
+            <li><a href="#solution">解决方案</a></li>
+            <li class="toc-h3"><a href="#why-redis">为什么选 Redis sorted set</a></li>
+            <li class="toc-h3"><a href="#implementation">实现</a></li>
+            <li class="toc-h3"><a href="#usage">集成到 fetcher</a></li>
+            <li><a href="#result">结果</a></li>
+            <li><a href="#extension">扩展：各交易所对比</a></li>
+          </ul>
+        </div>
+      </aside>
+
+    </div><!-- /article-layout -->
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p><a href="../index.html">← 返回首页</a> &nbsp;·&nbsp; <a href="mailto:aaliyahzhao@outlook.com">aaliyahzhao@outlook.com</a></p>
+    </div>
+  </footer>
+</body>
+</html>

@@ -277,6 +277,308 @@ a:hover {
   color: var(--accent);
 }
 
+/* ----- Hero: name + links ----- */
+.hero h1 {
+  font-size: 1.75rem;
+  font-weight: 600;
+  margin: 0 0 0.25rem;
+  letter-spacing: -0.02em;
+}
+.hero-title {
+  font-size: 0.95rem;
+  color: var(--accent);
+  margin: 0 0 0.6rem;
+  font-family: var(--font-mono);
+}
+.hero-desc {
+  color: var(--text-muted);
+  font-size: 1rem;
+  margin: 0 0 1rem;
+}
+.hero-links {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.hero-links a {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  padding: 0.25rem 0.65rem;
+  border-radius: 6px;
+}
+.hero-links a:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  text-decoration: none;
+}
+
+/* ----- Impact numbers ----- */
+.impact-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem 2.5rem;
+  margin: 0;
+  padding: 1.25rem 0;
+}
+.impact-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.impact-number {
+  font-size: 1.5rem;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--accent);
+  letter-spacing: -0.02em;
+}
+.impact-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+/* ----- Series card ----- */
+.series-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.series-card-header {
+  background: var(--surface);
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+.series-card-header h3 {
+  margin: 0 0 0.4rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+.series-card-header p {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.series-card-articles {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  counter-reset: series-counter;
+}
+.series-card-articles li {
+  counter-increment: series-counter;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.65rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.9rem;
+}
+.series-card-articles li:last-child {
+  border-bottom: none;
+}
+.series-card-articles li::before {
+  content: counter(series-counter);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  min-width: 1.2rem;
+}
+.series-card-articles li.pending {
+  color: var(--text-muted);
+}
+.series-card-articles li.pending a,
+.series-card-articles li.pending {
+  color: var(--text-muted);
+}
+.series-card-articles a {
+  color: var(--text);
+  flex: 1;
+}
+.series-card-articles a:hover {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+/* ----- Tags and status badges ----- */
+.tag {
+  display: inline-block;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-family: var(--font-mono);
+  padding: 0.1rem 0.5rem;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.tag-accent {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.article-status {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  padding: 0.1rem 0.45rem;
+  border-radius: 4px;
+  white-space: nowrap;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.article-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+}
+.article-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin-top: 0.3rem;
+  flex-wrap: wrap;
+}
+.article-meta-row .sep {
+  color: var(--border);
+}
+.series-label {
+  color: var(--accent);
+  font-size: 0.8rem;
+  font-family: var(--font-mono);
+}
+
+/* ----- Article two-column layout (content + TOC) ----- */
+.article-layout {
+  display: grid;
+  grid-template-columns: 1fr 200px;
+  gap: 2.5rem;
+  align-items: start;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 0 1.25rem;
+}
+.article-content {
+  min-width: 0;
+}
+.article-toc {
+  position: sticky;
+  top: 1.5rem;
+}
+.toc {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.875rem 1rem;
+  font-size: 0.82rem;
+}
+.toc-title {
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.75rem;
+  margin-bottom: 0.6rem;
+}
+.toc-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.toc-list li {
+  padding: 0.2rem 0;
+}
+.toc-list a {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  line-height: 1.4;
+  display: block;
+}
+.toc-list a:hover {
+  color: var(--accent);
+  text-decoration: none;
+}
+.toc-list .toc-h3 {
+  padding-left: 0.75rem;
+}
+@media (max-width: 720px) {
+  .article-layout {
+    grid-template-columns: 1fr;
+  }
+  .article-toc {
+    display: none;
+  }
+}
+
+/* ----- Series navigation strip ----- */
+.series-nav {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  margin-top: 2.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border);
+}
+.series-nav-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  font-size: 0.85rem;
+  text-decoration: none;
+  display: block;
+  transition: border-color 0.15s;
+}
+.series-nav-item:hover {
+  border-color: var(--accent);
+  text-decoration: none;
+}
+.series-nav-item .nav-direction {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-bottom: 0.25rem;
+}
+.series-nav-item .nav-title {
+  color: var(--text);
+  font-weight: 500;
+  line-height: 1.4;
+}
+.series-nav-item.next {
+  text-align: right;
+}
+.series-nav-item.placeholder {
+  visibility: hidden;
+}
+
+/* ----- Code highlight (highlight.js overrides) ----- */
+.hljs {
+  background: var(--surface) !important;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1rem !important;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  overflow-x: auto;
+}
+.article-body pre {
+  padding: 0;
+  background: none;
+  border: none;
+}
+.article-body pre code.hljs {
+  border-radius: 6px;
+}
+.code-label {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-bottom: 0.3rem;
+  display: block;
+}
+
 /* ----- Recruiter / non-technical TL;DR ----- */
 .recruiter-tldr {
   background: var(--accent-soft);

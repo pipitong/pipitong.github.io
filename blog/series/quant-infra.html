@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>量化数据基础设施：从零到生产 · 系列文章</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../css/style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <h1 class="site-title"><a href="../index.html">Tongtong Zhao</a></h1>
+      <nav class="nav">
+        <a href="../index.html#series">系列</a>
+        <a href="../index.html#articles">文章</a>
+        <a href="../index.html#tech">技术栈</a>
+        <a href="../about/">About</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <a href="../index.html" class="back-link">← 返回首页</a>
+
+    <article>
+      <header class="article-header">
+        <div class="article-meta-row" style="margin-bottom:0.5rem;">
+          <span class="series-label">系列</span>
+        </div>
+        <h1>量化数据基础设施：从零到生产</h1>
+        <div class="article-meta-row">
+          <span>Tongtong Zhao</span>
+          <span class="sep">·</span>
+          <span>2025 年</span>
+        </div>
+      </header>
+
+      <div class="article-body">
+        <p>这个系列记录了在量化公司从零参与搭建数据基础设施的完整过程——从一盘散沙的 cron 脚本，到覆盖 10+ 交易所、500+ 交易对的统一数据采集与入湖平台，以及链上/另类数据的接入实践。</p>
+        <p>每篇文章聚焦一个具体问题，有前因后果，有技术细节，有数字支撑。不是教程，是工程复盘。</p>
+
+        <h2>系列文章</h2>
+        <ol class="series-card-articles" style="border: 1px solid var(--border); border-radius: 8px; background: var(--surface);">
+          <li>
+            <a href="../articles/what-does-quant-de-do.html">量化公司的数据工程师在做什么？</a>
+            <span class="article-status">入门 · 4 分钟</span>
+          </li>
+          <li>
+            <a href="../articles/from-zero-data-pipeline.html">从零搭建线上数据管道：需求、架构与表设计</a>
+            <span class="article-status">5 分钟</span>
+          </li>
+          <li>
+            <a href="../articles/rate-limit-redis-sliding-window.html">那个每天让我们丢数据的 Bug：Redis 滑动窗口限流实践</a>
+            <span class="article-status">9 分钟</span>
+          </li>
+          <li class="pending">
+            历史数据 10 亿行，45 分钟完成：代理池与并发设计
+            <span class="article-status">待写</span>
+          </li>
+          <li class="pending">
+            ClickHouse 在量化数据场景的选型与实践
+            <span class="article-status">待写</span>
+          </li>
+          <li class="pending">
+            交易对上下架：比你想象中更难的运营问题
+            <span class="article-status">待写</span>
+          </li>
+          <li class="pending">
+            链上数据接入：Polymarket + The Graph 工程实践
+            <span class="article-status">待写</span>
+          </li>
+        </ol>
+
+        <h2 style="margin-top: 2rem;">系列覆盖的技术点</h2>
+        <ul>
+          <li><strong>多交易所数据采集</strong>：Binance、Bybit、OKX、Coinbase、KuCoin、Bitget、Gate、Hyperliquid，统一 Reader/Endpoint 抽象，8+ 数据类型（K 线、资金费率、持仓量、多空比、期权 IV 等）</li>
+          <li><strong>限流与可靠性</strong>：Redis sorted set 滑动窗口，全局 weight 池，修复 multi-worker over-quota 缺口</li>
+          <li><strong>历史数据大批量入湖</strong>：API → S3 (Parquet) → ClickHouse，SOCKS5 代理池横向扩展，22 req/s → 710 req/s，10 亿+ 行</li>
+          <li><strong>调度与编排</strong>：Prefect flow，per-task 监控，auto-retry，统一 VWAP 计算与符号管理</li>
+          <li><strong>存储设计</strong>：ClickHouse ReplacingMergeTree，分区键与主键，TTL，批量写入</li>
+          <li><strong>符号生命周期</strong>：YAML + Git，PR 自动合并，下架审批，Slack 通知</li>
+          <li><strong>链上/另类数据</strong>：Polymarket on-chain（The Graph GraphQL / Arbitrum），~10M records；LunarCrush 社交指标，Nansen Smart Money</li>
+        </ul>
+      </div>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p><a href="../index.html">← 返回首页</a> &nbsp;·&nbsp; <a href="mailto:aaliyahzhao@outlook.com">aaliyahzhao@outlook.com</a></p>
+    </div>
+  </footer>
+</body>
+</html>

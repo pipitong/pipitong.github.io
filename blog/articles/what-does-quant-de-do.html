@@ -12,12 +12,12 @@
 <body>
   <header class="site-header">
     <div class="container">
-      <h1 class="site-title"><a href="../index.html">Blog</a></h1>
+      <h1 class="site-title"><a href="../index.html">Tongtong Zhao</a></h1>
       <nav class="nav">
-        <a href="../index.html">首页</a>
+        <a href="../index.html#series">系列</a>
         <a href="../index.html#articles">文章</a>
         <a href="../index.html#tech">技术栈</a>
-        <a href="../index.html#about">About</a>
+        <a href="../about/">About</a>
       </nav>
     </div>
   </header>
@@ -27,8 +27,17 @@
 
     <article>
       <header class="article-header">
-        <h1>量化公司里的数据工程师在做什么？</h1>
-        <div class="meta">入门 · 给毫无背景的面试官</div>
+        <div class="article-meta-row" style="margin-bottom:0.5rem;">
+          <span class="series-label">系列：量化数据基础设施从零到生产 · #1</span>
+        </div>
+        <h1>量化公司的数据工程师在做什么？</h1>
+        <div class="article-meta-row">
+          <span>2025-09</span>
+          <span class="sep">·</span>
+          <span>约 4 分钟</span>
+          <span class="sep">·</span>
+          <span>入门 · 量化 · 给毫无背景的面试官</span>
+        </div>
       </header>
 
       <div class="article-body">
@@ -76,12 +85,22 @@
           <strong>面试一句话（给非量化岗位）：</strong> 我在量化公司从零参与搭建了多交易所、多类型数据的入湖管道，负责「接进来、存好、不丢、能查」；这套能力——多数据源统一接入、限流与重试、调度与监控、从零搭管道——在电商、广告、风控等需要多源实时数据的场景都可以复用。
         </div>
       </div>
+
+      <!-- Series navigation -->
+      <nav class="series-nav" aria-label="系列导航">
+        <div class="series-nav-item prev placeholder" aria-hidden="true"></div>
+        <a href="from-zero-data-pipeline.html" class="series-nav-item next">
+          <div class="nav-direction">下一篇 →</div>
+          <div class="nav-title">从零搭建线上数据管道：需求、架构与表设计</div>
+        </a>
+      </nav>
+
     </article>
   </main>
 
   <footer class="site-footer">
     <div class="container">
-      <p><a href="../index.html">返回首页</a></p>
+      <p><a href="../index.html">← 返回首页</a> &nbsp;·&nbsp; <a href="mailto:aaliyahzhao@outlook.com">aaliyahzhao@outlook.com</a></p>
     </div>
   </footer>
 </body>

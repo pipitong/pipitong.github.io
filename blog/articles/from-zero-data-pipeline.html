@@ -12,12 +12,12 @@
 <body>
   <header class="site-header">
     <div class="container">
-      <h1 class="site-title"><a href="../index.html">Blog</a></h1>
+      <h1 class="site-title"><a href="../index.html">Tongtong Zhao</a></h1>
       <nav class="nav">
-        <a href="../index.html">首页</a>
+        <a href="../index.html#series">系列</a>
         <a href="../index.html#articles">文章</a>
         <a href="../index.html#tech">技术栈</a>
-        <a href="../index.html#about">About</a>
+        <a href="../about/">About</a>
       </nav>
     </div>
   </header>
@@ -27,8 +27,17 @@
 
     <article>
       <header class="article-header">
-        <h1>从零为一家公司搭建线上数据管道</h1>
-        <div class="meta">数据工程 · 架构 · 从零搭建</div>
+        <div class="article-meta-row" style="margin-bottom:0.5rem;">
+          <span class="series-label">系列：量化数据基础设施从零到生产 · #2</span>
+        </div>
+        <h1>从零搭建线上数据管道：需求、架构与表设计</h1>
+        <div class="article-meta-row">
+          <span>2025-09</span>
+          <span class="sep">·</span>
+          <span>约 5 分钟</span>
+          <span class="sep">·</span>
+          <span>架构 · Prefect · ClickHouse · 从零搭建</span>
+        </div>
       </header>
 
       <div class="article-body">
@@ -62,12 +71,25 @@
           <strong>面试一句话：</strong> 我在量化公司从零参与搭建了多交易所数据入湖管道，覆盖需求、架构选型、表设计、限流与重试；保证数据及时、完整、可追溯，并用统一调度与监控支持独立重跑与告警。
         </div>
       </div>
+
+      <!-- Series navigation -->
+      <nav class="series-nav" aria-label="系列导航">
+        <a href="what-does-quant-de-do.html" class="series-nav-item prev">
+          <div class="nav-direction">← 上一篇</div>
+          <div class="nav-title">量化公司的数据工程师在做什么？</div>
+        </a>
+        <a href="rate-limit-redis-sliding-window.html" class="series-nav-item next">
+          <div class="nav-direction">下一篇 →</div>
+          <div class="nav-title">那个每天让我们丢数据的 Bug：Redis 滑动窗口限流实践</div>
+        </a>
+      </nav>
+
     </article>
   </main>
 
   <footer class="site-footer">
     <div class="container">
-      <p><a href="../index.html">返回首页</a></p>
+      <p><a href="../index.html">← 返回首页</a> &nbsp;·&nbsp; <a href="mailto:aaliyahzhao@outlook.com">aaliyahzhao@outlook.com</a></p>
     </div>
   </footer>
 </body>
