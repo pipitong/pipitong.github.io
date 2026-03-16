@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Prefect 生产实践：Flow 结构、部署与数据告警</title>
+  <meta name="description" content="在量化数据采集系统里用 Prefect 的实际经验：flow 与 task 的拆分原则、部署方式、重试策略，以及如何做数据新鲜度告警。" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../css/style.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script>hljs.highlightAll();</script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <h1 class="site-title"><a href="../index.html">Tongtong Zhao</a></h1>
+      <nav class="nav">
+        <a href="../index.html#writing">文章</a>
+        <a href="../series/quant-infra.html">系列</a>
+        <a href="../about/">About</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <div class="article-layout">
+
+      <div class="article-content">
+        <a href="../index.html" class="back-link">← 返回</a>
+
+        <article>
+          <header class="article-header">
+            <div class="article-meta-row" style="margin-bottom:0.5rem;">
+              <span class="series-label">系列：量化数据基础设施从零到生产 · #9</span>
+            </div>
+            <h1>Prefect 生产实践：Flow 结构、部署与数据告警</h1>
+            <div class="article-meta-row">
+              <span>2025-12</span>
+              <span class="sep">·</span>
+              <span>约 10 分钟</span>
+            </div>
+          </header>
+
+          <div class="article-body">
+
+            <p>数据采集系统在开发阶段运行脚本就够了。上生产之后，需要知道：哪个任务跑了多久、哪个失败了、是偶发还是持续失败、失败之后有没有重试、重试成了没有。这些是 Prefect 做的事情。</p>
+            <p>这篇记录我们在量化数据采集系统里用 Prefect 的实际方式：从 flow/task 的划分原则、部署配置，到重试策略和数据新鲜度告警的实现。</p>
+
+            <h2 id="why-prefect">为什么选 Prefect 而不是 Airflow / cron</h2>
+
+            <p>选型时主要对比了三个方案：</p>
+
+            <table style="width:100%; border-collapse:collapse; font-size:0.85rem; margin: 1rem 0;">
+              <thead>
+                <tr style="border-bottom:1px solid var(--border); text-align:left;">
+                  <th style="padding:0.5rem 0.75rem; color:var(--text-muted);"></th>
+                  <th style="padding:0.5rem 0.75rem; color:var(--text-muted);">cron + Python 脚本</th>
+                  <th style="padding:0.5rem 0.75rem; color:var(--text-muted);">Airflow</th>
+                  <th style="padding:0.5rem 0.75rem; color:var(--text-muted);">Prefect</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style="border-bottom:1px solid var(--border);">
+                  <td style="padding:0.5rem 0.75rem;">部署复杂度</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">极低</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">高（需要 scheduler、webserver、数据库）</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">中（Prefect Cloud 托管 control plane，自己只管 worker）</td>
+                </tr>
+                <tr style="border-bottom:1px solid var(--border);">
+                  <td style="padding:0.5rem 0.75rem;">任务级别可见性</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">无（脚本要么成功要么失败）</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">有（DAG 视图，task 状态）</td>
+                  <td style="padding:0.5rem 0.75rem; font-weight:500;">有（task 级别日志、耗时、重试次数）</td>
+                </tr>
+                <tr style="border-bottom:1px solid var(--border);">
+                  <td style="padding:0.5rem 0.75rem;">代码即配置</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">是</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">部分（DAG 是 Python，但有很多 Airflow-specific 概念）</td>
+                  <td style="padding:0.5rem 0.75rem; font-weight:500;">是（普通 Python 函数加装饰器）</td>
+                </tr>
+                <tr>
+                  <td style="padding:0.5rem 0.75rem;">动态参数化</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">手动处理</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">有限（Jinja 模板）</td>
+                  <td style="padding:0.5rem 0.75rem; font-weight:500;">原生支持（flow 接受任意参数）</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <p>Airflow 的部署和维护成本对我们这种小团队太重了。cron 的问题是没有可见性——脚本失败了发一封邮件，但不知道是哪一步失败、失败前做了什么、重试了几次。Prefect 的 control plane 托管在 Prefect Cloud，我们只需要在自己的机器（或 AKS）上跑 worker，维护成本可控。</p>
+
+            <h2 id="flow-structure">Flow 结构：一个 flow 一个 endpoint</h2>
+
+            <p>我们的 flow 划分原则：<strong>一个 flow 对应一个（exchange, data_type）的定时采集任务</strong>。例如：</p>
+            <ul>
+              <li><code>binance-futures-kline</code>：每分钟拉一次 Binance 永续合约 K 线</li>
+              <li><code>okx-funding-rate</code>：每 8 小时拉一次 OKX 资金费率</li>
+              <li><code>hyperliquid-open-interest</code>：每 5 分钟拉一次 Hyperliquid 持仓量</li>
+            </ul>
+            <p>这样粒度的好处：某个交易所的某种数据失败，不影响其他 flow；Prefect UI 里一眼能看出是哪个数据源出问题；失败重试也是局部的，不会触发整批数据重跑。</p>
+
+            <span class="code-label">典型 flow 结构</span>
+            <pre><code class="language-python">from prefect import flow, task, get_run_logger
+from prefect.tasks import task_input_hash
+from datetime import timedelta
+
+@task(
+    retries=3,
+    retry_delay_seconds=30,
+    cache_key_fn=task_input_hash,
+    cache_expiration=timedelta(minutes=2),
+)
+async def fetch_kline_batch(exchange: str, symbol: str, bar: str, start_ts: int) -> list[dict]:
+    logger = get_run_logger()
+    logger.info(f"Fetching {exchange} {symbol} {bar} from {start_ts}")
+    # ... 实际拉取逻辑
+    return rows
+
+@task(retries=2, retry_delay_seconds=10)
+async def write_to_clickhouse(rows: list[dict], table: str) -> int:
+    if not rows:
+        return 0
+    # ... 批量写入
+    return len(rows)
+
+@flow(name="binance-futures-kline", log_prints=True)
+async def binance_futures_kline_flow(bar: str = "1m"):
+    symbols = load_active_symbols("binance", "futures")
+    # 并发拉取所有 symbol，最多 20 个并发
+    tasks = [fetch_kline_batch.submit(
+        exchange="binance", symbol=s, bar=bar,
+        start_ts=get_last_ts("binance", s, bar),
+    ) for s in symbols[:20]]   # Prefect 的 .submit() 用于并发
+
+    all_rows = []
+    for t in tasks:
+        all_rows.extend(await t.result())
+
+    count = await write_to_clickhouse(all_rows, "kline")
+    print(f"Wrote {count} rows")</code></pre>
+
+            <h2 id="task-vs-flow">Task 的拆分粒度</h2>
+
+            <p>Prefect 里 task 和 flow 都可以有重试，但两者的语义不同：</p>
+            <ul>
+              <li><strong>Task 重试</strong>：局部重试，只重跑失败的那一步，已完成的 task 不重跑（如果开了 cache）</li>
+              <li><strong>Flow 重试</strong>：整个 flow 重跑，所有 task 都重新执行</li>
+            </ul>
+            <p>实践中的拆分原则：</p>
+            <ul>
+              <li>「可能失败、需要独立重试」的操作 → task（API 调用、数据库写入）</li>
+              <li>「纯计算、不会失败」的操作 → 普通函数，不需要是 task（数据转换、格式化）</li>
+              <li>「一组相关操作，要么全成功要么全不算」→ 放在同一个 task 里</li>
+            </ul>
+            <p>过度拆分 task 的问题：每个 task 都有 Prefect 的调度开销（状态写入 API），task 太细会让简单任务的开销反而很大。</p>
+
+            <h2 id="deployment">部署：Work Pool + Deployment YAML</h2>
+
+            <p>Prefect 2.x 的部署模型：</p>
+            <ul>
+              <li><strong>Work Pool</strong>：worker 的分组，可以是本地进程池、Docker 容器、Kubernetes Job</li>
+              <li><strong>Deployment</strong>：一个 flow 的「运行配置」——用哪个 work pool、调度时间、默认参数</li>
+              <li><strong>Worker</strong>：持续运行的进程，轮询 Prefect Cloud，拉到任务就执行</li>
+            </ul>
+
+            <span class="code-label">prefect.yaml（deployment 配置示例）</span>
+            <pre><code class="language-yaml">deployments:
+  - name: binance-futures-kline-1m
+    flow_name: binance-futures-kline
+    parameters:
+      bar: "1m"
+    schedules:
+      - cron: "* * * * *"   # 每分钟
+        timezone: "UTC"
+    work_pool:
+      name: data-workers
+      job_variables:
+        image: "our-registry/data-collector:latest"
+
+  - name: okx-funding-rate
+    flow_name: okx-funding-rate-flow
+    schedules:
+      - cron: "5 0,8,16 * * *"   # 每天三次，结算后 5 分钟
+        timezone: "UTC"
+    work_pool:
+      name: data-workers</code></pre>
+
+            <p>Work pool 类型选择：开发环境用 <code>Process</code>（本地进程），生产环境用 <code>Kubernetes</code>（AKS），每个 flow run 启动一个独立 Pod，互相隔离，失败不影响其他任务。</p>
+
+            <h2 id="retry-strategy">重试策略设计</h2>
+
+            <p>不是所有失败都应该重试，重试策略需要区分错误类型：</p>
+
+            <span class="code-label">带指数退避的智能重试</span>
+            <pre><code class="language-python">from prefect.tasks import exponential_backoff
+
+class ExchangeAPIError(Exception): pass
+class RateLimitError(ExchangeAPIError): pass
+class TemporaryError(ExchangeAPIError): pass
+class PermanentError(ExchangeAPIError): pass   # 比如 404，不应该重试
+
+@task(
+    retries=4,
+    retry_delay_seconds=exponential_backoff(backoff_factor=2),
+    retry_condition_fn=lambda task, task_run, state: (
+        # 只重试临时错误，不重试永久错误
+        isinstance(state.result(raise_on_failure=False), (TemporaryError, RateLimitError))
+    ),
+)
+async def fetch_with_retry(endpoint: Endpoint) -> list[dict]:
+    try:
+        return await reader.fetch_all(endpoint)
+    except HTTPStatusError as e:
+        if e.response.status_code == 404:
+            raise PermanentError(f"Symbol not found: {endpoint}")
+        elif e.response.status_code == 429:
+            raise RateLimitError("Rate limited")
+        else:
+            raise TemporaryError(str(e))</code></pre>
+
+            <h2 id="freshness-alert">数据新鲜度告警</h2>
+
+            <p>Prefect 告诉你 flow 有没有跑成功，但「flow 成功」不代表「数据是最新的」——可能 API 返回了空数据、写入了 0 行，而 flow 没有失败。需要单独的数据质量检查。</p>
+            <p>我们有一个独立的 flow 每 15 分钟运行一次，检查各个关键数据表的最新记录时间：</p>
+
+            <span class="code-label">数据新鲜度检查 flow</span>
+            <pre><code class="language-python">from prefect import flow, task
+import clickhouse_connect
+import httpx
+from datetime import datetime, timezone
+
+# 配置：每个 (exchange, data_type) 允许的最大延迟
+FRESHNESS_THRESHOLDS = {
+    ("binance", "kline_1m"):       timedelta(minutes=5),
+    ("binance", "funding_rate"):   timedelta(hours=9),   # 8h 结算 + 1h 缓冲
+    ("okx", "kline_1m"):           timedelta(minutes=5),
+    ("hyperliquid", "kline_1m"):   timedelta(minutes=10),
+}
+
+@task
+def check_freshness(ch_client, exchange: str, data_type: str) -> dict:
+    table = data_type.split("_")[0]   # "kline_1m" → "kline"
+    result = ch_client.query(f"""
+        SELECT max(open_time) as latest
+        FROM {table}
+        WHERE exchange = '{exchange}'
+    """)
+    latest_ts = result.first_row[0]
+    if latest_ts is None:
+        return {"exchange": exchange, "data_type": data_type, "status": "empty"}
+
+    lag = datetime.now(timezone.utc) - latest_ts.replace(tzinfo=timezone.utc)
+    threshold = FRESHNESS_THRESHOLDS.get((exchange, data_type), timedelta(minutes=15))
+
+    return {
+        "exchange": exchange,
+        "data_type": data_type,
+        "lag_seconds": lag.total_seconds(),
+        "threshold_seconds": threshold.total_seconds(),
+        "status": "stale" if lag > threshold else "ok",
+    }
+
+@task
+def send_slack_alert(stale_checks: list[dict], slack_webhook: str):
+    if not stale_checks:
+        return
+    lines = ["⚠️ 数据新鲜度告警"]
+    for c in stale_checks:
+        lag_min = c["lag_seconds"] / 60
+        lines.append(f"• `{c['exchange']}/{c['data_type']}` 已落后 {lag_min:.0f} 分钟")
+    httpx.post(slack_webhook, json={"text": "\n".join(lines)})
+
+@flow(name="data-freshness-check")
+def freshness_check_flow(slack_webhook: str):
+    ch = clickhouse_connect.get_client(host="localhost")
+    results = [check_freshness(ch, ex, dt) for ex, dt in FRESHNESS_THRESHOLDS]
+    stale = [r for r in results if r["status"] == "stale"]
+    if stale:
+        send_slack_alert(stale, slack_webhook)</code></pre>
+
+            <h2 id="flow-level-hooks">Flow 级别的失败通知</h2>
+
+            <p>除了数据新鲜度检查，Prefect 本身的 flow 失败也要通知。Prefect 2.x 支持 <code>on_failure</code> hook：</p>
+
+            <span class="code-label">flow 失败时推送 Slack</span>
+            <pre><code class="language-python">from prefect import flow
+from prefect.blocks.notifications import SlackWebhook
+
+def on_flow_failure(flow, flow_run, state):
+    slack = SlackWebhook.load("data-alerts")
+    slack.notify(
+        f"❌ Flow 失败: `{flow.name}`\n"
+        f"Run: {flow_run.name}\n"
+        f"Error: {state.message}"
+    )
+
+@flow(
+    name="binance-futures-kline",
+    on_failure=[on_flow_failure],
+)
+async def binance_futures_kline_flow(bar: str = "1m"):
+    ...</code></pre>
+
+            <h2 id="monitoring-dashboard">监控仪表盘：用 Prefect UI 够不够</h2>
+
+            <p>Prefect Cloud 的 UI 已经提供了：</p>
+            <ul>
+              <li>每个 flow run 的状态（成功/失败/运行中/取消）</li>
+              <li>每个 task 的耗时和日志</li>
+              <li>历史成功率趋势（过去 7 天的 flow 成功率）</li>
+              <li>重试次数和最终状态</li>
+            </ul>
+            <p>对于我们的场景，这已经够了——加上 Slack 告警，不需要额外搭 Grafana。如果要更细粒度的监控（比如每个 symbol 写入了多少行、哪些 symbol 有数据缺口），就需要在 ClickHouse 里做自定义查询，这是 Prefect UI 覆盖不到的。</p>
+
+            <h2 id="pitfalls">几个坑</h2>
+            <ul>
+              <li><strong>task cache 的陷阱</strong>：<code>cache_key_fn=task_input_hash</code> 会根据参数哈希缓存 task 结果，如果同一分钟内因为失败重跑了整个 flow，相同参数的 task 会直接用缓存结果（不再实际执行）。这在大多数情况下是正确的，但如果 task 有副作用（比如写数据库），需要谨慎设置 cache 策略。</li>
+              <li><strong>并发 flow 的 rate limit 冲突</strong>：如果 Prefect 并发跑多个 flow（比如同时跑 5 个 Binance-related flow），rate limit 问题就回到了<a href="rate-limit-redis-sliding-window.html">那篇 Redis 限流文章</a>描述的状态——需要确保所有 flow 共用同一个 Redis rate limiter，而不是各自有独立的限流器。</li>
+              <li><strong>Prefect Cloud 的 API 速率限制</strong>：Prefect 每次 task 状态变更都会向 Prefect Cloud 报告，task 拆分太细会消耗大量 Prefect API 请求配额（免费 tier 有限制）。一个 flow 里有几百个 task 是常见的，但几千个可能会触发限制。</li>
+            </ul>
+
+          </div>
+        </article>
+
+        <nav class="series-nav" aria-label="系列导航">
+          <a href="onchain-polymarket-pipeline.html" class="series-nav-item prev">
+            <div class="nav-direction">← 上一篇</div>
+            <div class="nav-title">链上数据接入：Polymarket 从 subgraph 到 ClickHouse 的完整流程</div>
+          </a>
+          <div class="series-nav-item next placeholder" aria-hidden="true"></div>
+        </nav>
+
+      </div>
+
+      <aside class="article-toc">
+        <div class="toc">
+          <div class="toc-title">目录</div>
+          <ul class="toc-list">
+            <li><a href="#why-prefect">为什么选 Prefect</a></li>
+            <li><a href="#flow-structure">Flow 结构</a></li>
+            <li><a href="#task-vs-flow">Task 拆分粒度</a></li>
+            <li><a href="#deployment">部署：Work Pool</a></li>
+            <li><a href="#retry-strategy">重试策略设计</a></li>
+            <li><a href="#freshness-alert">数据新鲜度告警</a></li>
+            <li><a href="#flow-level-hooks">Flow 失败通知</a></li>
+            <li><a href="#monitoring-dashboard">监控仪表盘</a></li>
+            <li><a href="#pitfalls">几个坑</a></li>
+          </ul>
+        </div>
+      </aside>
+
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p><a href="../index.html">← 返回首页</a> &nbsp;·&nbsp; <a href="mailto:aaliyahzhao@outlook.com">aaliyahzhao@outlook.com</a></p>
+    </div>
+  </footer>
+</body>
+</html>

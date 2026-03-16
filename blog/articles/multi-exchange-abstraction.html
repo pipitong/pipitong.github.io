@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>统一接多个交易所：Endpoint/Reader 抽象层的设计</title>
+  <meta name="description" content="从 exchange-specific 脚本到统一抽象层，记录如何设计一套让新增交易所从「两天」变成「两小时」的 Reader/Endpoint 框架。" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../css/style.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script>hljs.highlightAll();</script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <h1 class="site-title"><a href="../index.html">Tongtong Zhao</a></h1>
+      <nav class="nav">
+        <a href="../index.html#writing">文章</a>
+        <a href="../series/quant-infra.html">系列</a>
+        <a href="../about/">About</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <div class="article-layout">
+
+      <div class="article-content">
+        <a href="../index.html" class="back-link">← 返回</a>
+
+        <article>
+          <header class="article-header">
+            <div class="article-meta-row" style="margin-bottom:0.5rem;">
+              <span class="series-label">系列：量化数据基础设施从零到生产 · #3.5</span>
+            </div>
+            <h1>统一接多个交易所：Endpoint/Reader 抽象层的设计</h1>
+            <div class="article-meta-row">
+              <span>2025-10</span>
+              <span class="sep">·</span>
+              <span>约 11 分钟</span>
+            </div>
+          </header>
+
+          <div class="article-body">
+
+            <p>接第二个交易所时，我们复制了第一个的大部分代码；接第三个时，发现修一个 bug 要改三个地方。第四个之前，决定重新设计接入层。</p>
+            <p>这篇记录最终的抽象方式——Endpoint / Reader 两层设计，以及这个设计在接入 Hyperliquid（API 风格和 Binance 完全不同）时是否经得住考验。</p>
+
+            <h2 id="the-problem">问题：每个交易所「差一点但又差很多」</h2>
+
+            <p>表面上看，各交易所的 API 很像：都是 HTTP 请求，都返回 JSON，都有分页。实际工程里差异很多：</p>
+
+            <table style="width:100%; border-collapse:collapse; font-size:0.85rem; margin: 1rem 0;">
+              <thead>
+                <tr style="border-bottom:1px solid var(--border); text-align:left;">
+                  <th style="padding:0.5rem 0.75rem; color:var(--text-muted);">维度</th>
+                  <th style="padding:0.5rem 0.75rem; color:var(--text-muted);">Binance</th>
+                  <th style="padding:0.5rem 0.75rem; color:var(--text-muted);">OKX</th>
+                  <th style="padding:0.5rem 0.75rem; color:var(--text-muted);">KuCoin</th>
+                  <th style="padding:0.5rem 0.75rem; color:var(--text-muted);">Hyperliquid</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style="border-bottom:1px solid var(--border);">
+                  <td style="padding:0.5rem 0.75rem;">HTTP 方法</td>
+                  <td style="padding:0.5rem 0.75rem; font-family:var(--font-mono); font-size:0.8rem;">GET</td>
+                  <td style="padding:0.5rem 0.75rem; font-family:var(--font-mono); font-size:0.8rem;">GET</td>
+                  <td style="padding:0.5rem 0.75rem; font-family:var(--font-mono); font-size:0.8rem;">GET</td>
+                  <td style="padding:0.5rem 0.75rem; font-family:var(--font-mono); font-size:0.8rem;">POST (全部)</td>
+                </tr>
+                <tr style="border-bottom:1px solid var(--border);">
+                  <td style="padding:0.5rem 0.75rem;">分页方式</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">startTime 升序</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">after/before 降序</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">startAt 升序（秒）</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">startTime 升序（但参数在 body）</td>
+                </tr>
+                <tr style="border-bottom:1px solid var(--border);">
+                  <td style="padding:0.5rem 0.75rem;">时间戳单位</td>
+                  <td style="padding:0.5rem 0.75rem; font-family:var(--font-mono); font-size:0.8rem;">ms</td>
+                  <td style="padding:0.5rem 0.75rem; font-family:var(--font-mono); font-size:0.8rem;">ms</td>
+                  <td style="padding:0.5rem 0.75rem; font-family:var(--font-mono); font-size:0.8rem;">s</td>
+                  <td style="padding:0.5rem 0.75rem; font-family:var(--font-mono); font-size:0.8rem;">ms</td>
+                </tr>
+                <tr style="border-bottom:1px solid var(--border);">
+                  <td style="padding:0.5rem 0.75rem;">限流单位</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">weight / min</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">req/s per endpoint</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">weight / 30s</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">req/s 全局</td>
+                </tr>
+                <tr>
+                  <td style="padding:0.5rem 0.75rem;">K 线字段格式</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">数组 [ts, o, h, l, c, v, ...]</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">数组 [ts, o, h, l, c, vol, ...]</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">数组但字段顺序不同</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">对象 {"t": ..., "o": ...}</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <p>这些差异分散在代码里，就是每个函数里一堆 <code>if exchange == "okx":</code>。接到第三个交易所时，这种方式的维护成本已经超过了当初省下的设计时间。</p>
+
+            <h2 id="two-layers">两层抽象：Endpoint 和 Reader</h2>
+
+            <p>拆分职责：</p>
+            <ul>
+              <li><strong>Endpoint</strong>：「这个数据在这个交易所怎么取」—— API 路径、请求参数构造、响应解析、分页逻辑、这次请求消耗多少 rate limit weight</li>
+              <li><strong>Reader</strong>：「取数据这件事本身的通用逻辑」—— HTTP 客户端、限流控制、重试、错误处理、并发协调</li>
+            </ul>
+            <p><code>Reader</code> 不关心取的是哪个交易所、哪种数据类型——它只知道「给我一个 Endpoint，我来负责发请求、限流、重试、返回结果」。</p>
+
+            <h2 id="endpoint-design">Endpoint 基类</h2>
+
+            <span class="code-label">Endpoint 基类</span>
+            <pre><code class="language-python">from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import Any, AsyncIterator
+
+@dataclass
+class RawPage:
+    """一次 API 请求的原始返回结果。"""
+    data: Any
+    has_more: bool
+    next_cursor: Any = None   # 用于下一次请求的 cursor（时间戳或 ID）
+
+class Endpoint(ABC):
+    """
+    描述「如何从某个交易所取某种数据的一页」。
+    子类只需实现三个方法。
+    """
+
+    @property
+    @abstractmethod
+    def rate_limit_weight(self) -> int:
+        """这次请求消耗多少 weight（用于限流控制）。"""
+
+    @abstractmethod
+    def build_request(self, cursor: Any = None) -> dict:
+        """
+        构造 HTTP 请求参数。
+        返回: {"method": "GET", "url": "...", "params": {...}}
+        或:   {"method": "POST", "url": "...", "json": {...}}
+        """
+
+    @abstractmethod
+    def parse_response(self, raw: Any) -> RawPage:
+        """
+        解析响应，提取数据行和分页信息。
+        raw: 已 JSON 解析的响应体
+        """
+
+    def normalize_row(self, row: Any) -> dict:
+        """
+        可选：把 exchange-specific 格式转成统一 schema。
+        默认直接返回（子类可 override）。
+        """
+        return row</code></pre>
+
+            <h2 id="reader-design">Reader：通用执行层</h2>
+
+            <span class="code-label">Reader 基类（处理限流、重试、分页）</span>
+            <pre><code class="language-python">import asyncio
+import aiohttp
+from typing import AsyncIterator
+
+class Reader:
+    def __init__(self, rate_limiter, session: aiohttp.ClientSession):
+        self._limiter = rate_limiter
+        self._session = session
+
+    async def fetch_page(self, endpoint: Endpoint, cursor=None) -> RawPage:
+        """发一次请求，处理限流和重试。"""
+        request = endpoint.build_request(cursor)
+        weight = endpoint.rate_limit_weight
+
+        for attempt in range(3):
+            await self._limiter.acquire(weight)
+            try:
+                async with self._session.request(**request) as resp:
+                    if resp.status == 429:
+                        retry_after = int(resp.headers.get("Retry-After", 30))
+                        await asyncio.sleep(retry_after)
+                        continue
+                    resp.raise_for_status()
+                    raw = await resp.json()
+                    return endpoint.parse_response(raw)
+            except aiohttp.ClientError as e:
+                if attempt == 2:
+                    raise
+                await asyncio.sleep(2 ** attempt)
+
+    async def paginate(self, endpoint: Endpoint, start_cursor=None) -> AsyncIterator[list[dict]]:
+        """翻页直到没有更多数据，每页 yield 一批标准化的行。"""
+        cursor = start_cursor
+        while True:
+            page = await self.fetch_page(endpoint, cursor)
+            rows = [endpoint.normalize_row(r) for r in page.data]
+            if rows:
+                yield rows
+            if not page.has_more:
+                break
+            cursor = page.next_cursor
+            await asyncio.sleep(0.05)   # 对交易所友好</code></pre>
+
+            <h2 id="binance-example">实现示例：Binance K 线</h2>
+
+            <span class="code-label">BinanceFuturesKlineEndpoint</span>
+            <pre><code class="language-python">class BinanceFuturesKlineEndpoint(Endpoint):
+    def __init__(self, symbol: str, bar: str, limit: int = 1000):
+        self.symbol = symbol
+        self.bar = bar
+        self.limit = limit
+
+    @property
+    def rate_limit_weight(self) -> int:
+        # Binance: limit <= 100 → weight 1, <= 500 → weight 2, <= 1000 → weight 5
+        if self.limit <= 100:
+            return 1
+        elif self.limit <= 500:
+            return 2
+        return 5
+
+    def build_request(self, cursor=None) -> dict:
+        params = {
+            "symbol": self.symbol,
+            "interval": self.bar,
+            "limit": self.limit,
+        }
+        if cursor is not None:
+            params["startTime"] = cursor   # Binance: 升序分页用 startTime
+        return {
+            "method": "GET",
+            "url": "https://fapi.binance.com/fapi/v1/klines",
+            "params": params,
+        }
+
+    def parse_response(self, raw: list) -> RawPage:
+        if not raw:
+            return RawPage(data=[], has_more=False)
+        return RawPage(
+            data=raw,
+            has_more=len(raw) == self.limit,
+            next_cursor=raw[-1][0] + 1,   # 下一页从最后一根 K 线的时间戳 + 1ms 开始
+        )
+
+    def normalize_row(self, row: list) -> dict:
+        return {
+            "open_time": row[0],
+            "open":      float(row[1]),
+            "high":      float(row[2]),
+            "low":       float(row[3]),
+            "close":     float(row[4]),
+            "volume":    float(row[5]),
+            "quote_volume": float(row[7]),
+            "trades":    int(row[8]),
+        }</code></pre>
+
+            <h2 id="okx-example">OKX 的差异在哪里</h2>
+
+            <p>OKX K 线接口默认<strong>降序</strong>返回（最新的在前），分页靠 <code>after</code>（比这个时间戳旧）。这个逻辑完全封装在 OKX 的 Endpoint 子类里，Reader 无感知：</p>
+
+            <span class="code-label">OKXKlineEndpoint（关键差异部分）</span>
+            <pre><code class="language-python">class OKXKlineEndpoint(Endpoint):
+    def build_request(self, cursor=None) -> dict:
+        params = {
+            "instId": self.symbol,
+            "bar": self.bar,
+            "limit": str(self.limit),
+        }
+        if cursor is not None:
+            params["after"] = str(cursor)   # OKX: 降序分页，取比 cursor 更旧的数据
+        return {
+            "method": "GET",
+            "url": "https://www.okx.com/api/v5/market/candles",
+            "params": params,
+        }
+
+    def parse_response(self, raw: dict) -> RawPage:
+        rows = raw.get("data", [])
+        if not rows:
+            return RawPage(data=[], has_more=False)
+        return RawPage(
+            data=rows,
+            has_more=len(rows) == self.limit,
+            next_cursor=rows[-1][0],   # 最后一条（最旧的）时间戳作为下一页的 after
+        )
+
+    def normalize_row(self, row: list) -> dict:
+        return {
+            "open_time":    int(row[0]),
+            "open":         float(row[1]),
+            "high":         float(row[2]),
+            "low":          float(row[3]),
+            "close":        float(row[4]),
+            "volume":       float(row[5]),
+            "quote_volume": float(row[7]),
+        }</code></pre>
+
+            <h2 id="hyperliquid">Hyperliquid：POST-only API 的处理</h2>
+
+            <p>Hyperliquid 是全 POST 的 API，请求体是 JSON，这在 Endpoint 里是完全合法的——只需要把 <code>build_request</code> 返回 POST 格式即可，Reader 层不需要任何修改：</p>
+
+            <span class="code-label">HyperliquidKlineEndpoint（POST 风格）</span>
+            <pre><code class="language-python">class HyperliquidKlineEndpoint(Endpoint):
+    BASE_URL = "https://api.hyperliquid.xyz/info"
+
+    def __init__(self, symbol: str, bar: str, limit: int = 500):
+        self.symbol = symbol
+        self.bar = bar
+        self.limit = limit
+
+    @property
+    def rate_limit_weight(self) -> int:
+        return 1   # Hyperliquid: 固定 1 req 计一次
+
+    def build_request(self, cursor=None) -> dict:
+        body = {
+            "type": "candleSnapshot",
+            "req": {
+                "coin": self.symbol,
+                "interval": self.bar,
+                "startTime": cursor or 0,
+                "endTime": int(time.time() * 1000),
+            }
+        }
+        return {
+            "method": "POST",
+            "url": self.BASE_URL,
+            "json": body,    # aiohttp 的 json= 参数自动 Content-Type: application/json
+        }
+
+    def parse_response(self, raw: list) -> RawPage:
+        if not raw:
+            return RawPage(data=[], has_more=False)
+        return RawPage(
+            data=raw,
+            has_more=len(raw) == self.limit,
+            next_cursor=raw[-1]["t"] + 1,
+        )
+
+    def normalize_row(self, row: dict) -> dict:
+        return {
+            "open_time": row["t"],
+            "open":      float(row["o"]),
+            "high":      float(row["h"]),
+            "low":       float(row["l"]),
+            "close":     float(row["c"]),
+            "volume":    float(row["v"]),
+        }</code></pre>
+
+            <h2 id="registry">Exchange Registry：统一注册与查找</h2>
+
+            <p>所有 Endpoint 子类注册到一个 registry，调用方只需要传 exchange + data_type + symbol，不需要知道用哪个子类：</p>
+
+            <span class="code-label">Endpoint registry</span>
+            <pre><code class="language-python">from typing import Type
+
+_REGISTRY: dict[tuple[str, str], Type[Endpoint]] = {}
+
+def register(exchange: str, data_type: str):
+    """装饰器：把 Endpoint 子类注册到全局 registry。"""
+    def decorator(cls: Type[Endpoint]) -> Type[Endpoint]:
+        _REGISTRY[(exchange, data_type)] = cls
+        return cls
+    return decorator
+
+def get_endpoint_class(exchange: str, data_type: str) -> Type[Endpoint]:
+    key = (exchange, data_type)
+    if key not in _REGISTRY:
+        raise ValueError(f"No endpoint registered for {exchange}/{data_type}")
+    return _REGISTRY[key]
+
+# 使用方式：
+@register("binance_futures", "kline")
+class BinanceFuturesKlineEndpoint(Endpoint):
+    ...
+
+@register("okx", "kline")
+class OKXKlineEndpoint(Endpoint):
+    ...
+
+# 调用方：
+EndpointCls = get_endpoint_class("hyperliquid", "kline")
+endpoint = EndpointCls(symbol="BTC", bar="1m")
+async for batch in reader.paginate(endpoint, start_cursor=start_ts):
+    await write_to_clickhouse(batch)</code></pre>
+
+            <h2 id="result">效果：新增交易所的工作量变化</h2>
+
+            <p>重构前后对比：</p>
+
+            <table style="width:100%; border-collapse:collapse; font-size:0.85rem; margin: 1rem 0;">
+              <thead>
+                <tr style="border-bottom:1px solid var(--border); text-align:left;">
+                  <th style="padding:0.5rem 0.75rem; color:var(--text-muted);"></th>
+                  <th style="padding:0.5rem 0.75rem; color:var(--text-muted);">重构前</th>
+                  <th style="padding:0.5rem 0.75rem; color:var(--text-muted);">重构后</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style="border-bottom:1px solid var(--border);">
+                  <td style="padding:0.5rem 0.75rem;">新增一个交易所的 K 线采集</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">复制现有代码 → 改 API URL、参数、分页逻辑、限流逻辑：约 1–2 天</td>
+                  <td style="padding:0.5rem 0.75rem; font-weight:500;">实现 Endpoint 子类 3 个方法：约 2–4 小时</td>
+                </tr>
+                <tr style="border-bottom:1px solid var(--border);">
+                  <td style="padding:0.5rem 0.75rem;">修复限流 bug（如超配额）</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">每个交易所各改一遍</td>
+                  <td style="padding:0.5rem 0.75rem; font-weight:500;">只改 Reader 层，一次修全部交易所</td>
+                </tr>
+                <tr style="border-bottom:1px solid var(--border);">
+                  <td style="padding:0.5rem 0.75rem;">新增一种数据类型（如 OI）</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">每个交易所各写一套</td>
+                  <td style="padding:0.5rem 0.75rem; font-weight:500;">每个交易所实现一个 OI Endpoint，Reader 复用</td>
+                </tr>
+                <tr>
+                  <td style="padding:0.5rem 0.75rem;">单元测试覆盖</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">难以 mock，因为 API 调用分散在各处</td>
+                  <td style="padding:0.5rem 0.75rem; font-weight:500;">只需 mock <code>build_request</code> 和 <code>parse_response</code>，Reader 层可独立测试</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <h2 id="pitfalls">什么时候这个抽象会「漏」</h2>
+
+            <p>Endpoint/Reader 抽象不是万能的，有几个地方需要打补丁：</p>
+            <ul>
+              <li><strong>认证方式差异</strong>：有些交易所需要在 header 里签名（Binance、OKX），有些需要 API key 作为 query param（KuCoin），有些公开接口不需要任何认证（Hyperliquid 大部分数据）。认证逻辑放在 Reader 的子类里（如 <code>BinanceReader</code>、<code>OKXReader</code>），不进 Endpoint，因为认证是「和交易所建立连接的方式」，而不是「取某种数据的逻辑」。</li>
+              <li><strong>OKX 的历史 K 线需要切换接口路径</strong>：<a href="crypto-quant-data-landscape.html#ohlcv-window">数据全景那篇</a>提到了这个问题——超过 1440 根要换 endpoint。这个逻辑放在 <code>OKXKlineEndpoint</code> 里，通过 <code>build_request</code> 动态决定用哪个 URL。</li>
+              <li><strong>WebSocket 数据</strong>：上面的抽象是 REST 的。WebSocket 实时数据有不同的连接维护、消息解析、重连逻辑，需要另一套 <code>StreamEndpoint</code> 基类，不强行套进同一个 Endpoint 接口。</li>
+            </ul>
+
+          </div>
+        </article>
+
+        <nav class="series-nav" aria-label="系列导航">
+          <a href="from-zero-data-pipeline.html" class="series-nav-item prev">
+            <div class="nav-direction">← 上一篇</div>
+            <div class="nav-title">从零搭建线上数据管道：需求、架构与表设计</div>
+          </a>
+          <a href="rate-limit-redis-sliding-window.html" class="series-nav-item next">
+            <div class="nav-direction">下一篇 →</div>
+            <div class="nav-title">那个每天让我们丢数据的 Bug：Redis 滑动窗口限流实践</div>
+          </a>
+        </nav>
+
+      </div>
+
+      <aside class="article-toc">
+        <div class="toc">
+          <div class="toc-title">目录</div>
+          <ul class="toc-list">
+            <li><a href="#the-problem">问题：每个交易所「差一点但差很多」</a></li>
+            <li><a href="#two-layers">两层抽象：Endpoint 和 Reader</a></li>
+            <li><a href="#endpoint-design">Endpoint 基类</a></li>
+            <li><a href="#reader-design">Reader：通用执行层</a></li>
+            <li><a href="#binance-example">Binance K 线实现</a></li>
+            <li><a href="#okx-example">OKX 的差异处理</a></li>
+            <li><a href="#hyperliquid">Hyperliquid：POST-only</a></li>
+            <li><a href="#registry">Exchange Registry</a></li>
+            <li><a href="#result">效果对比</a></li>
+            <li><a href="#pitfalls">抽象的边界</a></li>
+          </ul>
+        </div>
+      </aside>
+
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p><a href="../index.html">← 返回首页</a> &nbsp;·&nbsp; <a href="mailto:aaliyahzhao@outlook.com">aaliyahzhao@outlook.com</a></p>
+    </div>
+  </footer>
+</body>
+</html>
