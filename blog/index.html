@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Tongtong Zhao · Data Engineer</title>
-  <meta name="description" content="在量化公司从零搭建多交易所数据基础设施。写清楚踩过的坑。" />
+  <title>Tongtong Zhao</title>
+  <meta name="description" content="在量化公司做数据工程，写一些工作里遇到的真实问题。" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -15,9 +15,8 @@
     <div class="container">
       <h1 class="site-title"><a href="index.html">Tongtong Zhao</a></h1>
       <nav class="nav">
-        <a href="#series">系列</a>
-        <a href="#articles">文章</a>
-        <a href="#tech">技术栈</a>
+        <a href="#writing">文章</a>
+        <a href="series/quant-infra.html">系列</a>
         <a href="about/">About</a>
       </nav>
     </div>
@@ -25,165 +24,56 @@
 
   <main>
 
-    <!-- Hero -->
+    <!-- Intro -->
     <section class="hero">
       <div class="container">
-        <h1>Tongtong Zhao</h1>
-        <p class="hero-title">Data Engineer · Crypto Quant</p>
-        <p class="hero-desc">在量化公司从零搭建多交易所数据基础设施。<br>记录架构决策、工程细节和踩过的坑。</p>
-        <div class="hero-links">
-          <a href="mailto:aaliyahzhao@outlook.com">✉ Email</a>
-          <a href="https://github.com/pipitong" target="_blank">⌥ GitHub</a>
-          <a href="about/">About / Resume</a>
+        <p class="hero-desc" style="margin:0; font-size:1rem;">
+          在量化公司做数据工程。这里记录工作里遇到的真实问题——限流、大批量入湖、链上数据接入、调度与监控。
+        </p>
+        <div class="hero-links" style="margin-top: 0.75rem;">
+          <a href="about/">About</a>
+          <a href="mailto:aaliyahzhao@outlook.com">Email</a>
+          <a href="https://github.com/pipitong" target="_blank">GitHub</a>
         </div>
       </div>
     </section>
 
-    <!-- Impact numbers -->
-    <section class="section" style="border-bottom: 1px solid var(--border);">
+    <!-- Writing -->
+    <section class="section" id="writing">
       <div class="container">
-        <div class="impact-row">
-          <div class="impact-item">
-            <div class="impact-number">10+</div>
-            <div class="impact-label">接入交易所</div>
-          </div>
-          <div class="impact-item">
-            <div class="impact-number">8+</div>
-            <div class="impact-label">数据类型</div>
-          </div>
-          <div class="impact-item">
-            <div class="impact-number">10亿+</div>
-            <div class="impact-label">历史行数（1m K线）</div>
-          </div>
-          <div class="impact-item">
-            <div class="impact-number">45min</div>
-            <div class="impact-label">KuCoin 4年 SPOT 补全</div>
-          </div>
-          <div class="impact-item">
-            <div class="impact-number">710 req/s</div>
-            <div class="impact-label">代理池峰值吞吐</div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Featured series -->
-    <section class="section" id="series">
-      <div class="container">
-        <h2 class="section-title">系列文章</h2>
-        <div class="series-card">
-          <div class="series-card-header">
-            <h3>量化数据基础设施：从零到生产</h3>
-            <p>从一盘散沙的 cron 脚本到统一的多交易所数据平台。完整记录架构决策、工程细节、踩坑与解法。</p>
-          </div>
-          <ol class="series-card-articles">
-            <li>
-              <a href="articles/what-does-quant-de-do.html">量化公司的数据工程师在做什么？</a>
-              <span class="article-status">入门</span>
-            </li>
-            <li>
-              <a href="articles/from-zero-data-pipeline.html">从零搭建线上数据管道：需求、架构与表设计</a>
-            </li>
-            <li>
-              <a href="articles/rate-limit-redis-sliding-window.html">那个每天让我们丢数据的 Bug：Redis 滑动窗口限流实践</a>
-            </li>
-            <li class="pending">
-              历史数据 10 亿行，45 分钟完成：代理池与并发设计
-              <span class="article-status">待写</span>
-            </li>
-            <li class="pending">
-              ClickHouse 在量化数据场景的选型与实践
-              <span class="article-status">待写</span>
-            </li>
-            <li class="pending">
-              交易对上下架：比你想象中更难的运营问题
-              <span class="article-status">待写</span>
-            </li>
-            <li class="pending">
-              链上数据接入：Polymarket + The Graph 工程实践
-              <span class="article-status">待写</span>
-            </li>
-          </ol>
-        </div>
-      </div>
-    </section>
-
-    <!-- All articles -->
-    <section class="section" id="articles">
-      <div class="container">
-        <h2 class="section-title">所有文章</h2>
+        <h2 class="section-title">文章</h2>
         <ul class="article-list">
 
           <li>
             <a href="articles/rate-limit-redis-sliding-window.html">那个每天让我们丢数据的 Bug：Redis 滑动窗口限流实践</a>
             <div class="article-meta-row">
-              <span class="series-label">系列 #3</span>
-              <span class="sep">·</span>
               <span>2025-11</span>
               <span class="sep">·</span>
-              <span>约 9 分钟</span>
+              <span><a href="series/quant-infra.html" style="color:var(--text-muted);">量化数据基础设施系列</a></span>
             </div>
-            <div class="article-tags">
-              <span class="tag tag-accent">Redis</span>
-              <span class="tag">Rate Limit</span>
-              <span class="tag">Binance</span>
-              <span class="tag">可靠性</span>
-            </div>
-            <div class="summary">多个 Prefect worker 各自维护内存计数，Binance 实际收到的请求远超 weight 上限，引发 429 和数据缺口。用 Redis sorted set + Lua script 实现跨进程原子滑动窗口，缺口归零。</div>
+            <div class="summary">多个 Prefect worker 各自维护内存限流计数，在并发高峰触发 Binance 429/418，产生每日数据缺口。记录排查过程和用 Redis sorted set 做全局 weight 池的修复方案。</div>
           </li>
 
           <li>
             <a href="articles/from-zero-data-pipeline.html">从零搭建线上数据管道：需求、架构与表设计</a>
             <div class="article-meta-row">
-              <span class="series-label">系列 #2</span>
-              <span class="sep">·</span>
               <span>2025-09</span>
               <span class="sep">·</span>
-              <span>约 5 分钟</span>
+              <span><a href="series/quant-infra.html" style="color:var(--text-muted);">量化数据基础设施系列</a></span>
             </div>
-            <div class="article-tags">
-              <span class="tag">架构</span>
-              <span class="tag">Prefect</span>
-              <span class="tag">ClickHouse</span>
-              <span class="tag">从零搭建</span>
-            </div>
-            <div class="summary">从需求出发，记录调度选型、存储方案、表设计原则，以及离线历史与在线流如何保持一致。面试可直接用来回答「你如何从零搭建数据体系」。</div>
+            <div class="summary">从业务需求出发，记录调度与存储的选型过程、表设计的取舍，以及离线历史补数与实时流如何保持 schema 一致。</div>
           </li>
 
           <li>
-            <a href="articles/what-does-quant-de-do.html">量化公司的数据工程师在做什么？</a>
+            <a href="articles/what-does-quant-de-do.html">量化公司的数据工程师在做什么</a>
             <div class="article-meta-row">
-              <span class="series-label">系列 #1</span>
-              <span class="sep">·</span>
               <span>2025-09</span>
               <span class="sep">·</span>
-              <span>约 4 分钟</span>
+              <span><a href="series/quant-infra.html" style="color:var(--text-muted);">量化数据基础设施系列</a></span>
             </div>
-            <div class="article-tags">
-              <span class="tag">入门</span>
-              <span class="tag">量化</span>
-            </div>
-            <div class="summary">给毫无背景的面试官：量化公司要什么数据、数据从哪来、数据工程师负责「接进来、存好、不丢、能查」，以及和泛数据岗位的共通点。</div>
+            <div class="summary">量化公司需要哪些数据、从哪里来、为什么这些数据难拿——以及数据工程在这里具体做什么。背景介绍篇，没有代码。</div>
           </li>
 
-        </ul>
-      </div>
-    </section>
-
-    <!-- Tech stack -->
-    <section class="section" id="tech">
-      <div class="container">
-        <h2 class="section-title">技术栈</h2>
-        <p class="tech-intro">以下是在量化数据项目里实际用到的技术，括号内是用途。</p>
-        <ul class="tech-tags">
-          <li>Python</li>
-          <li>Prefect（调度与编排）</li>
-          <li>ClickHouse（分析型存储）</li>
-          <li>Redis（限流 / 缓存）</li>
-          <li>S3 / Parquet（原始数据湖）</li>
-          <li>多交易所 REST/WS API</li>
-          <li>The Graph / GraphQL（链上数据）</li>
-          <li>Docker / AKS</li>
         </ul>
       </div>
     </section>
@@ -193,14 +83,11 @@
       <div class="container">
         <h2 class="section-title">About</h2>
         <div class="about">
-          <p>南邮软工本科，曾在微软 M365 做数据平台开发 4 年（$40M/month 成本归因系统、AKS 容器平台效率数据），现于量化公司做 Data Engineer，负责多交易所、链上+链下数据的采集与入湖基础设施建设。</p>
-          <p>本博客记录在量化数据工程里踩过的真实问题——有架构决策、有 Bug 复盘、有工程细节。部分文章面向非技术面试官，用通俗语言解释量化数据工程在做什么。</p>
+          <p>南邮软工，毕业后在微软 M365 做了四年数据平台，现在在一家量化公司做 Data Engineer。主要负责多交易所数据采集与入湖，顺带接一些链上和另类数据。</p>
           <p>
-            <a href="about/">详细介绍 →</a>
+            <a href="about/">更多 →</a>
             &nbsp;·&nbsp;
             <a href="mailto:aaliyahzhao@outlook.com">aaliyahzhao@outlook.com</a>
-            &nbsp;·&nbsp;
-            (+86) 133-577-31370
           </p>
         </div>
       </div>
@@ -210,13 +97,7 @@
 
   <footer class="site-footer">
     <div class="container">
-      <p>
-        <a href="mailto:aaliyahzhao@outlook.com">aaliyahzhao@outlook.com</a>
-        &nbsp;·&nbsp;
-        <a href="https://github.com/pipitong/pipitong.github.io" target="_blank">GitHub</a>
-        &nbsp;·&nbsp;
-        Hosted on GitHub Pages
-      </p>
+      <p><a href="mailto:aaliyahzhao@outlook.com">aaliyahzhao@outlook.com</a> &nbsp;·&nbsp; <a href="https://github.com/pipitong/pipitong.github.io" target="_blank">GitHub</a></p>
     </div>
   </footer>
 </body>
