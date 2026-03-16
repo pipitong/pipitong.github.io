@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>链上数据接入：Polymarket 从 subgraph 到 ClickHouse 的完整流程</title>
+  <meta name="description" content="Polymarket 链上数据接入全过程：The Graph subgraph 查询、增量同步设计、S3 暂存、ClickHouse 入库，以及数据质量检验。" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../css/style.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script>hljs.highlightAll();</script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <h1 class="site-title"><a href="../index.html">Tongtong Zhao</a></h1>
+      <nav class="nav">
+        <a href="../index.html#writing">文章</a>
+        <a href="../series/quant-infra.html">系列</a>
+        <a href="../about/">About</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <div class="article-layout">
+
+      <div class="article-content">
+        <a href="../index.html" class="back-link">← 返回</a>
+
+        <article>
+          <header class="article-header">
+            <div class="article-meta-row" style="margin-bottom:0.5rem;">
+              <span class="series-label">系列：量化数据基础设施从零到生产 · #7</span>
+            </div>
+            <h1>链上数据接入：Polymarket 从 subgraph 到 ClickHouse 的完整流程</h1>
+            <div class="article-meta-row">
+              <span>2025-12</span>
+              <span class="sep">·</span>
+              <span>约 11 分钟</span>
+            </div>
+          </header>
+
+          <div class="article-body">
+
+            <p>链上数据的接入和 CEX API 有本质不同——没有统一的 REST 接口，数据散落在链上日志里，需要通过索引层（如 The Graph）或直接读 RPC 才能拿到结构化数据。Polymarket 运行在 Arbitrum 上，The Graph 为它维护了专门的 subgraph，暴露了市场、交易、流动性等数据。</p>
+            <p>这篇记录完整的接入流程：从 subgraph 查询到增量同步设计，到 S3 暂存，再到 ClickHouse 入库和数据质量检验。</p>
+
+            <h2 id="data-model">Polymarket 的数据模型</h2>
+
+            <p>Polymarket 的预测市场每个问题有一个 <strong>Market</strong>，每个 Market 分两个 <strong>Outcome</strong>（Yes/No），用户可以买卖对应 Outcome 的份额。数据模型里几个核心实体：</p>
+            <ul>
+              <li><strong>Market</strong>：问题描述、结局、创建时间、成交量、结算结果</li>
+              <li><strong>Trade</strong>：每一笔成交——时间戳、市场、Outcome、方向（buy/sell）、数量、价格</li>
+              <li><strong>ConditionId</strong>：Polymarket 用来唯一标识 Market 的链上 ID（与 Gnosis Conditional Tokens 协议绑定）</li>
+            </ul>
+
+            <p>我们主要关心 <strong>Trade</strong>——类似 CEX 的 tick 数据，但来自链上事件日志而不是 REST API。</p>
+
+            <h2 id="subgraph-basics">Subgraph 查询基础</h2>
+
+            <p>Polymarket 的官方 subgraph 部署在 The Graph Network 上，GraphQL 端点大致是：</p>
+            <pre><code class="language-text">https://gateway.thegraph.com/api/{API_KEY}/subgraphs/id/{SUBGRAPH_ID}</code></pre>
+
+            <p>查询 Trade 的基本结构：</p>
+
+            <span class="code-label">查询最近的成交记录</span>
+            <pre><code class="language-graphql">query GetTrades($market: String!, $first: Int!, $lastId: ID!) {
+  trades(
+    first: $first
+    where: {
+      market: $market
+      id_gt: $lastId
+    }
+    orderBy: id
+    orderDirection: asc
+  ) {
+    id
+    timestamp
+    market { id, question }
+    outcomeIndex
+    side          # BUY / SELL
+    size          # 份额数量（USDC）
+    price         # 价格（0–1 之间）
+    transactionHash
+  }
+}</code></pre>
+
+            <p>注意用 <code>id_gt</code> 而不是 <code>skip</code> 翻页——The Graph 的 <code>skip</code> 有 5000 上限，超过后返回空结果，且不报错。这个坑在<a href="crypto-quant-data-landscape.html#thegraph">数据全景那篇</a>有解释。</p>
+
+            <h2 id="full-backfill">全量初始化：~10M 条记录</h2>
+
+            <p>第一次接入需要把所有历史 Trade 都拉下来。Polymarket 的 Trade 总量约 10M 条，每次最多拉 1000 条，需要约 10000 次请求。</p>
+
+            <span class="code-label">全量分页拉取（cursor-based）</span>
+            <pre><code class="language-python">import asyncio
+import aiohttp
+import pyarrow as pa
+import pyarrow.parquet as pq
+from pathlib import Path
+
+QUERY = """
+query GetAllTrades($lastId: ID!, $first: Int!) {
+  trades(
+    first: $first
+    where: { id_gt: $lastId }
+    orderBy: id
+    orderDirection: asc
+  ) {
+    id
+    timestamp
+    market { id }
+    outcomeIndex
+    side
+    size
+    price
+    transactionHash
+  }
+}
+"""
+
+SCHEMA = pa.schema([
+    pa.field("id", pa.string()),
+    pa.field("timestamp", pa.int64()),
+    pa.field("market_id", pa.string()),
+    pa.field("outcome_index", pa.int8()),
+    pa.field("side", pa.string()),
+    pa.field("size", pa.float64()),
+    pa.field("price", pa.float64()),
+    pa.field("tx_hash", pa.string()),
+])
+
+async def fetch_page(session: aiohttp.ClientSession, url: str, last_id: str) -> list[dict]:
+    async with session.post(url, json={
+        "query": QUERY,
+        "variables": {"lastId": last_id, "first": 1000}
+    }) as resp:
+        data = await resp.json()
+        return data["data"]["trades"]
+
+async def full_backfill(subgraph_url: str, output_dir: Path):
+    output_dir.mkdir(parents=True, exist_ok=True)
+    last_id = ""
+    page = 0
+
+    async with aiohttp.ClientSession() as session:
+        while True:
+            rows = await fetch_page(session, subgraph_url, last_id)
+            if not rows:
+                break
+
+            # 转成 Parquet 写入 S3（这里写本地，实际用 s3fs）
+            records = [{
+                "id": r["id"],
+                "timestamp": int(r["timestamp"]),
+                "market_id": r["market"]["id"],
+                "outcome_index": int(r["outcomeIndex"]),
+                "side": r["side"],
+                "size": float(r["size"]),
+                "price": float(r["price"]),
+                "tx_hash": r["transactionHash"],
+            } for r in rows]
+
+            table = pa.Table.from_pylist(records, schema=SCHEMA)
+            pq.write_table(table, output_dir / f"trades_page_{page:06d}.parquet")
+
+            last_id = rows[-1]["id"]
+            page += 1
+
+            # 友好地控制请求频率
+            await asyncio.sleep(0.05)</code></pre>
+
+            <h2 id="incremental-sync">增量同步：checkpoint 机制</h2>
+
+            <p>全量初始化完成后，每小时增量拉取新成交。增量同步的核心是记录上次同步的位置——用 ClickHouse 里最新的一条记录的 <code>id</code> 作为 checkpoint，下次从这个 <code>id</code> 之后继续。</p>
+
+            <span class="code-label">增量同步 Prefect flow</span>
+            <pre><code class="language-python">from prefect import flow, task
+import clickhouse_connect
+
+@task
+def get_last_synced_id(ch_client) -> str:
+    """从 ClickHouse 查上次同步的最新 trade id。"""
+    result = ch_client.query(
+        "SELECT max(id) FROM polymarket_trades"
+    )
+    last_id = result.first_row[0]
+    return last_id or ""
+
+@task
+async def fetch_new_trades(subgraph_url: str, last_id: str) -> list[dict]:
+    """拉取 last_id 之后的所有新成交。"""
+    all_trades = []
+    async with aiohttp.ClientSession() as session:
+        cursor = last_id
+        while True:
+            rows = await fetch_page(session, subgraph_url, cursor)
+            if not rows:
+                break
+            all_trades.extend(rows)
+            cursor = rows[-1]["id"]
+            await asyncio.sleep(0.05)
+    return all_trades
+
+@task
+def write_to_clickhouse(trades: list[dict], ch_client):
+    if not trades:
+        return
+    ch_client.insert("polymarket_trades", trades,
+                     column_names=["id", "timestamp", "market_id",
+                                   "outcome_index", "side", "size",
+                                   "price", "tx_hash"])
+
+@flow
+def polymarket_incremental_sync():
+    ch_client = clickhouse_connect.get_client(host="localhost")
+    last_id = get_last_synced_id(ch_client)
+    new_trades = fetch_new_trades.fn(SUBGRAPH_URL, last_id)  # 异步调用
+    write_to_clickhouse(new_trades, ch_client)</code></pre>
+
+            <h2 id="clickhouse-schema">ClickHouse 表设计</h2>
+
+            <p>Trade 数据按天分区，以 <code>id</code>（链上 log 的唯一标识）作为去重键：</p>
+
+            <span class="code-label">polymarket_trades 表结构</span>
+            <pre><code class="language-sql">CREATE TABLE polymarket_trades
+(
+    id              String,
+    trade_time      DateTime64(0, 'UTC'),
+    market_id       String,
+    outcome_index   Int8,        -- 0: No, 1: Yes
+    side            Enum8('BUY' = 1, 'SELL' = -1),
+    size            Float64,     -- USDC 金额
+    price           Float32,     -- 0.0 ~ 1.0（隐含概率）
+    tx_hash         String,
+    ingested_at     DateTime DEFAULT now()
+)
+ENGINE = ReplacingMergeTree
+PARTITION BY toYYYYMMDD(trade_time)
+ORDER BY (market_id, trade_time, id)
+TTL toDate(trade_time) + INTERVAL 3 YEAR;</code></pre>
+
+            <h2 id="data-quality">数据质量检验</h2>
+
+            <p>链上数据的质量问题和 CEX API 不一样，需要针对性地检验：</p>
+
+            <h3 id="subgraph-lag-check">Subgraph 延迟检测</h3>
+            <p>每次同步前检查 subgraph 的当前区块高度与链上最新区块的差距（见<a href="crypto-quant-data-landscape.html#subgraph-lag">数据全景那篇的代码</a>）。如果 lag > 50 块（Arbitrum 约 12 秒），记录告警但不中断同步——lag 大时数据是滞后的，但不是错的。</p>
+
+            <h3 id="price-bounds">价格边界检验</h3>
+            <p>Polymarket 的 price 应该在 (0, 1) 之间（除了最后结算的瞬间）。写入前过滤掉 price = 0 或 price = 1 的记录——这通常是结算事件，而不是正常成交，混入会污染回测数据。</p>
+
+            <span class="code-label">写入前的简单校验</span>
+            <pre><code class="language-python">def validate_trade(trade: dict) -> bool:
+    price = float(trade["price"])
+    size = float(trade["size"])
+    return (
+        0 < price < 1          # 不含边界值
+        and size > 0
+        and trade["side"] in ("BUY", "SELL")
+        and trade["tx_hash"].startswith("0x")
+    )</code></pre>
+
+            <h3 id="gap-check">连续性检查</h3>
+            <p>每天生成一张数据质量报告：按市场统计当天成交笔数，与前一天对比。成交量骤降（&gt;90%）可能意味着市场已结算（正常）或 subgraph 同步中断（异常）——需要结合市场的结算状态一起判断。</p>
+
+            <span class="code-label">日级成交量环比检查（ClickHouse SQL）</span>
+            <pre><code class="language-sql">WITH daily AS (
+    SELECT
+        toDate(trade_time) AS dt,
+        market_id,
+        count() AS trades_count,
+        sum(size) AS total_volume
+    FROM polymarket_trades FINAL
+    WHERE dt >= today() - 7
+    GROUP BY dt, market_id
+)
+SELECT
+    today_data.market_id,
+    today_data.trades_count    AS today_trades,
+    yesterday_data.trades_count AS yesterday_trades,
+    today_data.trades_count / greatest(yesterday_data.trades_count, 1) AS ratio
+FROM daily today_data
+LEFT JOIN daily yesterday_data
+    ON today_data.market_id = yesterday_data.market_id
+    AND yesterday_data.dt = today_data.dt - 1
+WHERE today_data.dt = today()
+  AND ratio < 0.1   -- 成交量较前一天下降 90% 以上
+ORDER BY ratio;</code></pre>
+
+            <h2 id="pitfalls">几个坑</h2>
+            <ul>
+              <li><strong>The Graph API key 的速率限制</strong>：免费 tier 的 API key 每分钟请求数有限，全量初始化时要控制节奏（sleep 50ms 每请求已经接近上限）。如果是长期生产使用，建议用付费 tier 或自建 subgraph 节点。</li>
+              <li><strong>Trade id 不是纯递增的数字</strong>：Polymarket subgraph 里 Trade 的 <code>id</code> 是 <code>{txHash}-{logIndex}</code> 格式的字符串，字典序和时间序大致一致，但不完全一致（同一区块内不同 log 的 id 字典序可能与 logIndex 顺序不符）。checkpoint 用 <code>id</code> 是安全的（不会漏数据），但查询时要用 <code>timestamp</code> 而不是 <code>id</code> 做时间范围过滤。</li>
+              <li><strong>市场结算后的数据</strong>：市场结算后，The Graph 里该 market 的 <code>resolved</code> 字段变为 true，价格会固定在 0 或 1。增量同步时不需要特殊处理，但如果分析时要过滤掉结算后的「交易」，需要 join market 表查 <code>resolved_at</code>。</li>
+              <li><strong>重复 trade</strong>：The Graph 的 subgraph 在极少数情况下（节点重组时）会重复返回同一笔 trade。ClickHouse 的 <code>ReplacingMergeTree</code> 加上 <code>FINAL</code> 查询会处理重复，但全量初始化时的 Parquet 文件里可能有重复行，入库前最好做一次去重。</li>
+            </ul>
+
+          </div>
+        </article>
+
+        <nav class="series-nav" aria-label="系列导航">
+          <a href="symbol-lifecycle.html" class="series-nav-item prev">
+            <div class="nav-direction">← 上一篇</div>
+            <div class="nav-title">交易对上下架：比你想象中更难的运营问题</div>
+          </a>
+          <div class="series-nav-item next placeholder" aria-hidden="true"></div>
+        </nav>
+
+      </div>
+
+      <aside class="article-toc">
+        <div class="toc">
+          <div class="toc-title">目录</div>
+          <ul class="toc-list">
+            <li><a href="#data-model">Polymarket 数据模型</a></li>
+            <li><a href="#subgraph-basics">Subgraph 查询基础</a></li>
+            <li><a href="#full-backfill">全量初始化</a></li>
+            <li><a href="#incremental-sync">增量同步</a></li>
+            <li><a href="#clickhouse-schema">ClickHouse 表设计</a></li>
+            <li><a href="#data-quality">数据质量检验</a></li>
+            <li class="toc-h3"><a href="#subgraph-lag-check">Subgraph 延迟检测</a></li>
+            <li class="toc-h3"><a href="#price-bounds">价格边界检验</a></li>
+            <li class="toc-h3"><a href="#gap-check">连续性检查</a></li>
+            <li><a href="#pitfalls">几个坑</a></li>
+          </ul>
+        </div>
+      </aside>
+
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p><a href="../index.html">← 返回首页</a> &nbsp;·&nbsp; <a href="mailto:aaliyahzhao@outlook.com">aaliyahzhao@outlook.com</a></p>
+    </div>
+  </footer>
+</body>
+</html>

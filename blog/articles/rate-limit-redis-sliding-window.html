@@ -51,11 +51,6 @@
 
           <div class="article-body">
 
-            <div class="recruiter-tldr">
-              <p><strong>给招聘方 / 非技术面试官：</strong> 交易所对 API 请求有频率限制（类似「每分钟只能问 2400 次」）。我们的系统有多个并发工作进程，每个进程各自计数，导致实际发出的请求数是限制的好几倍，交易所返回错误，数据就缺了。</p>
-              <p>这篇文章记录了怎么发现这个 Bug、为什么会发生、以及用 Redis 做一个「所有进程共享的计数器」来修复它。<strong>修复后，每日数据缺口归零。</strong></p>
-            </div>
-
             <h2 id="background">背景：我们的数据采集系统</h2>
             <p>系统的核心结构很简单：针对每个交易所的每种数据类型，部署一个 Prefect flow，按固定间隔拉取数据写入 ClickHouse。生产环境里 Binance 相关的 flow 大约有十几个，覆盖 K 线、资金费率、持仓量、多空比等数据类型，每个 flow 独立调度。</p>
             <p>Binance 的 API 有严格的 weight 配额制度——下文会详细说——我们当时在每个 flow 里各自做了限流处理，看起来没什么问题。</p>
@@ -281,9 +276,6 @@ def fetch_klines(symbol: str, interval: str, limit: int = 100) -> list:
             </ul>
             <p>把每个交易所的 rate limit key 注册到同一套 <code>RedisRateLimiter</code> 下，所有 flow 在发请求前统一 <code>acquire()</code>，是最干净的架构。</p>
 
-            <div class="interview-one-liner">
-              <strong>面试一句话：</strong> 发现多个 Prefect worker 各自维护内存计数，导致 Binance weight 超配额，产生 429/418 和每日数据缺口；用 Redis sorted set + Lua script 实现跨进程原子滑动窗口，所有 worker 共享一个全局 weight 池，缺口归零。
-            </div>
 
           </div><!-- /article-body -->
         </article>

@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ClickHouse 在量化数据场景的选型与实践</title>
+  <meta name="description" content="为什么量化数据场景选 ClickHouse，ReplacingMergeTree 怎么用，分区键和主键如何设计，以及批量写入和 TTL 的实践细节。" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../css/style.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script>hljs.highlightAll();</script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <h1 class="site-title"><a href="../index.html">Tongtong Zhao</a></h1>
+      <nav class="nav">
+        <a href="../index.html#writing">文章</a>
+        <a href="../series/quant-infra.html">系列</a>
+        <a href="../about/">About</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <div class="article-layout">
+
+      <div class="article-content">
+        <a href="../index.html" class="back-link">← 返回</a>
+
+        <article>
+          <header class="article-header">
+            <div class="article-meta-row" style="margin-bottom:0.5rem;">
+              <span class="series-label">系列：量化数据基础设施从零到生产 · #4</span>
+            </div>
+            <h1>ClickHouse 在量化数据场景的选型与实践</h1>
+            <div class="article-meta-row">
+              <span>2025-12</span>
+              <span class="sep">·</span>
+              <span>约 10 分钟</span>
+            </div>
+          </header>
+
+          <div class="article-body">
+
+            <p>量化数据的读写模式很有特点：写入是持续批量追加（每分钟写一批 K 线），读取是大范围时间扫描（研究员查半年的资金费率或跑回测）。这两种模式加在一起，行式数据库的表现很差。这篇文章记录选 ClickHouse 的原因、核心表设计，以及实际使用中遇到的细节。</p>
+
+            <h2 id="why-clickhouse">为什么选 ClickHouse</h2>
+
+            <p>最初用 PostgreSQL。500M 行 K 线数据，一个简单的时间范围聚合查询（<code>SELECT avg(close) FROM kline WHERE exchange='binance' AND symbol='BTCUSDT' AND open_time > '2024-01-01'</code>）要跑 30 秒以上，加了索引和分区之后降到 8 秒，但仍然不够快。</p>
+            <p>评估了几个替代方案：</p>
+
+            <table style="width:100%; border-collapse:collapse; font-size:0.85rem; margin: 1rem 0;">
+              <thead>
+                <tr style="border-bottom:1px solid var(--border); text-align:left;">
+                  <th style="padding:0.5rem 0.75rem; color:var(--text-muted);">方案</th>
+                  <th style="padding:0.5rem 0.75rem; color:var(--text-muted);">优点</th>
+                  <th style="padding:0.5rem 0.75rem; color:var(--text-muted);">缺点</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style="border-bottom:1px solid var(--border);">
+                  <td style="padding:0.5rem 0.75rem;">TimescaleDB</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">兼容 Postgres，迁移成本低</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">本质还是行存，压缩有改善但扫描大数据量仍慢</td>
+                </tr>
+                <tr style="border-bottom:1px solid var(--border);">
+                  <td style="padding:0.5rem 0.75rem;">InfluxDB</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">为时序数据优化，写入快</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">不支持 JOIN；查询语言（Flux）学习成本高；多维标签场景下性能不稳定</td>
+                </tr>
+                <tr style="border-bottom:1px solid var(--border);">
+                  <td style="padding:0.5rem 0.75rem;">ClickHouse</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">列存 + 向量化执行，大范围扫描快几个数量级；支持标准 SQL；压缩比高</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">不支持真正的 UPDATE/DELETE（需要用 ReplacingMergeTree）；点查（单行查询）不擅长</td>
+                </tr>
+                <tr>
+                  <td style="padding:0.5rem 0.75rem;">DuckDB</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">本地嵌入式，零运维；可直接查 Parquet</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">无服务端，不适合多用户并发查询；无持久化服务层</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <p>量化场景的查询几乎全是大范围扫描（「查 BTC 过去 6 个月所有 1m K 线」），极少单行点查，ClickHouse 是最合适的选择。同样的聚合查询，迁移到 ClickHouse 后从 8 秒降到 0.3 秒。</p>
+
+            <h2 id="replacing-merge-tree">ReplacingMergeTree：解决幂等写入问题</h2>
+
+            <p>量化数据需要频繁「补写」——历史补数、接口重试、数据修正都会把同一条数据写多次。ClickHouse 的 <code>MergeTree</code> 没有 UPDATE，重复写会产生重复行。</p>
+            <p><code>ReplacingMergeTree</code> 的机制：指定一个 <code>ver</code> 列，在后台合并（merge）时，相同主键的行只保留 <code>ver</code> 最大的那条。这不是实时去重——在 merge 发生前，查询可能看到重复行，需要在查询时加 <code>FINAL</code> 关键字或用 <code>argMax</code> 聚合。</p>
+
+            <span class="code-label">K 线表（ReplacingMergeTree）</span>
+            <pre><code class="language-sql">CREATE TABLE kline
+(
+    exchange    LowCardinality(String),
+    symbol      LowCardinality(String),
+    bar         LowCardinality(String),   -- '1m', '5m', '1h', '1d'
+    open_time   DateTime64(3, 'UTC'),     -- 毫秒精度
+    open        Float64,
+    high        Float64,
+    low         Float64,
+    close       Float64,
+    volume      Float64,
+    quote_volume Float64,
+    trades      UInt32,
+    updated_at  DateTime64(3, 'UTC') DEFAULT now64()  -- 用作 ver
+)
+ENGINE = ReplacingMergeTree(updated_at)
+PARTITION BY (exchange, toYYYYMM(open_time))
+ORDER BY (exchange, symbol, bar, open_time)
+TTL toDate(open_time) + INTERVAL 2 YEAR
+SETTINGS index_granularity = 8192;</code></pre>
+
+            <h2 id="partition-key">分区键：为什么按月而不是按天</h2>
+
+            <p>常见的问题是分区粒度选太细——比如按天分区。ClickHouse 的分区数有上限建议（不超过数千个），每个分区也有元数据开销。</p>
+            <p>对于 K 线这类数据：</p>
+            <ul>
+              <li>按天：10 个交易所 × 2 年 = 7300 个分区，超过建议上限，写入时元数据操作变慢</li>
+              <li>按月：10 个交易所 × 2 年 = 240 个分区，合理</li>
+              <li>如果数据量很大（亿级），按月每个分区约 100–500MB，压缩后 30–100MB，ClickHouse 的列存压缩效果明显</li>
+            </ul>
+            <p>另一个需要注意的是 <code>PARTITION BY</code> 里包含了 <code>exchange</code>——因为不同交易所的历史跨度和数据量差异大，不同交易所的数据落在不同分区，清理某个交易所的旧数据（<code>ALTER TABLE DROP PARTITION</code>）非常高效。</p>
+
+            <h2 id="order-key">主键（ORDER BY）：查询路径决定字段顺序</h2>
+
+            <p>ClickHouse 的 <code>ORDER BY</code> 决定数据在磁盘上的排序，也是稀疏索引的基础。字段顺序很重要：</p>
+            <ul>
+              <li><strong>最左字段</strong>应该是选择性低的（cardinality 低），因为 ClickHouse 在扫描时利用 <code>ORDER BY</code> 做范围跳过</li>
+              <li>常见查询是「某交易所某交易对某 bar 的时间范围」，所以顺序是 <code>(exchange, symbol, bar, open_time)</code></li>
+            </ul>
+            <p>注意 <code>ORDER BY</code> 也是 <code>ReplacingMergeTree</code> 的去重键——<strong>相同 <code>(exchange, symbol, bar, open_time)</code> 才会被视为同一条记录并去重</strong>。</p>
+
+            <h2 id="batch-write">批量写入：缓冲与异步</h2>
+
+            <p>ClickHouse 对写入批次大小很敏感——每次写入会产生一个 part 文件，part 太小（几十行）会导致后台 merge 压力大，最终影响查询性能。官方建议每次写入不少于 1000 行。</p>
+
+            <span class="code-label">异步批量写入（使用 clickhouse-connect）</span>
+            <pre><code class="language-python">import asyncio
+from clickhouse_connect import get_async_client
+from collections import defaultdict
+
+class ClickHouseBatchWriter:
+    def __init__(self, host: str, flush_size: int = 5000, flush_interval: float = 5.0):
+        self._host = host
+        self._flush_size = flush_size
+        self._flush_interval = flush_interval
+        self._buffers: dict[str, list] = defaultdict(list)
+        self._lock = asyncio.Lock()
+        self._client = None
+
+    async def connect(self):
+        self._client = await get_async_client(host=self._host)
+
+    async def insert(self, table: str, row: dict) -> None:
+        async with self._lock:
+            self._buffers[table].append(row)
+            if len(self._buffers[table]) >= self._flush_size:
+                await self._flush(table)
+
+    async def _flush(self, table: str) -> None:
+        rows = self._buffers.pop(table, [])
+        if not rows:
+            return
+        await self._client.insert(table, rows, column_names=list(rows[0].keys()))
+
+    async def flush_all(self) -> None:
+        async with self._lock:
+            for table in list(self._buffers.keys()):
+                await self._flush(table)</code></pre>
+
+            <h2 id="ttl">TTL：自动清理旧数据</h2>
+
+            <p>量化数据里有些类型不需要永久保留——比如 tick 级别的成交数据（占空间大，超过 3 个月基本不用回测），或者高频的 order book snapshot。ClickHouse 的 TTL 可以按行级别设置过期时间，过期后自动删除或转移到「冷」存储路径。</p>
+
+            <span class="code-label">对 tick 数据设置 90 天 TTL</span>
+            <pre><code class="language-sql">CREATE TABLE trades_tick
+(
+    exchange    LowCardinality(String),
+    symbol      LowCardinality(String),
+    trade_time  DateTime64(3, 'UTC'),
+    price       Float64,
+    qty         Float64,
+    side        Enum8('buy' = 1, 'sell' = -1),
+    trade_id    String
+)
+ENGINE = ReplacingMergeTree
+PARTITION BY (exchange, toYYYYMM(trade_time))
+ORDER BY (exchange, symbol, trade_time, trade_id)
+TTL toDate(trade_time) + INTERVAL 90 DAY
+SETTINGS index_granularity = 8192;</code></pre>
+
+            <h2 id="query-patterns">典型查询模式</h2>
+
+            <p>几个常见的量化查询写法：</p>
+
+            <span class="code-label">查某交易对最近 30 天的日级 OHLCV（回测用）</span>
+            <pre><code class="language-sql">SELECT
+    toDate(open_time) AS date,
+    argMin(open, open_time)  AS open,
+    max(high)                AS high,
+    min(low)                 AS low,
+    argMax(close, open_time) AS close,
+    sum(volume)              AS volume
+FROM kline FINAL
+WHERE exchange = 'binance'
+  AND symbol = 'BTCUSDT'
+  AND bar = '1m'
+  AND open_time >= now() - INTERVAL 30 DAY
+GROUP BY date
+ORDER BY date;</code></pre>
+
+            <span class="code-label">跨交易所资金费率对比（找套利窗口）</span>
+            <pre><code class="language-sql">SELECT
+    exchange,
+    symbol,
+    funding_time,
+    funding_rate,
+    funding_rate * 3 * 365 AS annualized_rate   -- 8h 结算 × 3 × 365
+FROM funding_rate FINAL
+WHERE symbol = 'BTCUSDT'
+  AND funding_time >= now() - INTERVAL 7 DAY
+ORDER BY funding_time, exchange;</code></pre>
+
+            <h2 id="pitfalls">几个坑</h2>
+            <ul>
+              <li><strong><code>FINAL</code> 关键字的性能开销</strong>：<code>SELECT ... FINAL</code> 会触发实时合并，开销比普通查询高。如果数据写入频率低（比如每分钟一批），可以配置 <code>deduplicate_blocks_in_dependent_materialized_views</code>，或者定期手动 <code>OPTIMIZE TABLE ... FINAL</code>，然后在非 merge 窗口不用加 FINAL。</li>
+              <li><strong>LowCardinality 类型</strong>：<code>exchange</code>、<code>symbol</code>、<code>bar</code> 这类低基数字符串，用 <code>LowCardinality(String)</code> 可以显著减少存储空间（内部用字典编码），查询时的过滤也更快。但如果某列的 distinct 值超过 10000，LowCardinality 反而会增加开销。</li>
+              <li><strong>Float64 精度问题</strong>：价格用 Float64 存储时，对于低价代币（如 0.000001234）会有精度损失。可以考虑用 <code>Decimal(18, 10)</code>，但会增加存储空间和计算开销，需要根据场景权衡。</li>
+            </ul>
+
+          </div>
+        </article>
+
+        <nav class="series-nav" aria-label="系列导航">
+          <a href="rate-limit-redis-sliding-window.html" class="series-nav-item prev">
+            <div class="nav-direction">← 上一篇</div>
+            <div class="nav-title">那个每天让我们丢数据的 Bug：Redis 滑动窗口限流实践</div>
+          </a>
+          <a href="bulk-ingest-proxy-pool.html" class="series-nav-item next">
+            <div class="nav-direction">下一篇 →</div>
+            <div class="nav-title">历史数据 10 亿行，45 分钟完成：代理池与并发设计</div>
+          </a>
+        </nav>
+
+      </div>
+
+      <aside class="article-toc">
+        <div class="toc">
+          <div class="toc-title">目录</div>
+          <ul class="toc-list">
+            <li><a href="#why-clickhouse">为什么选 ClickHouse</a></li>
+            <li><a href="#replacing-merge-tree">ReplacingMergeTree</a></li>
+            <li><a href="#partition-key">分区键：按月</a></li>
+            <li><a href="#order-key">主键（ORDER BY）</a></li>
+            <li><a href="#batch-write">批量写入</a></li>
+            <li><a href="#ttl">TTL 自动清理</a></li>
+            <li><a href="#query-patterns">典型查询模式</a></li>
+            <li><a href="#pitfalls">几个坑</a></li>
+          </ul>
+        </div>
+      </aside>
+
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p><a href="../index.html">← 返回首页</a> &nbsp;·&nbsp; <a href="mailto:aaliyahzhao@outlook.com">aaliyahzhao@outlook.com</a></p>
+    </div>
+  </footer>
+</body>
+</html>

@@ -14,16 +14,15 @@
     <div class="container">
       <h1 class="site-title"><a href="../index.html">Tongtong Zhao</a></h1>
       <nav class="nav">
-        <a href="../index.html#series">系列</a>
-        <a href="../index.html#articles">文章</a>
-        <a href="../index.html#tech">技术栈</a>
+        <a href="../index.html#writing">文章</a>
+        <a href="../series/quant-infra.html">系列</a>
         <a href="../about/">About</a>
       </nav>
     </div>
   </header>
 
   <main class="container">
-    <a href="../index.html#articles" class="back-link">← 返回文章列表</a>
+        <a href="../index.html" class="back-link">← 返回</a>
 
     <article>
       <header class="article-header">
@@ -41,11 +40,7 @@
       </header>
 
       <div class="article-body">
-        <div class="recruiter-tldr">
-          <p><strong>给招聘方 / 非技术面试官：</strong> 本文对应简历中的「从零参与搭建线上数据管道」。讲的是如何把多家交易所、多种类型的数据（K 线、资金费率等）稳定、及时地接进公司内部，并设计存储与限流，保证数据完整、可追溯。一句话：<strong>从零搭了一套多源、及时、完整、可追溯的量化数据入湖体系。</strong></p>
-        </div>
-
-        <p>本文总结在一家量化公司从零参与搭建线上数据管道的思路：从需求与目标到数据源、架构选型、表设计、可靠性设计，再到上线与迭代。面试时可直接用来回答「你如何从零搭建一套数据体系」。</p>
+        <p>记录在一家量化公司从零参与搭建线上数据管道的思路：从需求与目标到数据源、架构选型、表设计、可靠性设计，再到上线与迭代。</p>
 
         <h2>1. 需求与目标</h2>
         <p>先明确业务要什么：量化研究需要哪些数据、更新频率、历史深度、一致性要求。例如：多交易所 K 线/行情/资金费率/持仓量，部分链上或宏观数据；实时或准实时（分钟级/小时级）；需要能回溯历史、支持离线补数。目标可以概括为：<strong>多源、及时、完整、可追溯</strong>。</p>
@@ -65,11 +60,7 @@
         <h2>6. 上线与迭代</h2>
         <p>先上核心数据源与核心表，再逐步扩展；历史数据用离线任务补全，与在线流在 schema 和幂等写入上保持一致。后续可迭代：更多数据源、更细粒度监控、数据质量校验与告警等。</p>
 
-        <p>这样一套流程下来，就形成「从零搭建线上数据」的完整叙事，面试时可按上述结构展开，并结合你实际做过的细节（如具体表结构、某个交易所的限流策略）会更有说服力。</p>
-
-        <div class="interview-one-liner">
-          <strong>面试一句话：</strong> 我在量化公司从零参与搭建了多交易所数据入湖管道，覆盖需求、架构选型、表设计、限流与重试；保证数据及时、完整、可追溯，并用统一调度与监控支持独立重跑与告警。
-        </div>
+        <p>这套流程的核心原则：数据源→调度→存储每一层都要可独立重跑，历史补数和线上采集共用同一套 schema 与幂等写入逻辑。具体细节（表结构、限流策略）在系列后续文章里展开。</p>
       </div>
 
       <!-- Series navigation -->

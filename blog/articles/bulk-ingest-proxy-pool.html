@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>历史数据 10 亿行，45 分钟完成：代理池与并发设计</title>
+  <meta name="description" content="从单 IP 22 req/s 到代理池 710 req/s，记录 KuCoin 4 年 SPOT 历史数据批量入湖的工程过程。" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../css/style.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script>hljs.highlightAll();</script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <h1 class="site-title"><a href="../index.html">Tongtong Zhao</a></h1>
+      <nav class="nav">
+        <a href="../index.html#writing">文章</a>
+        <a href="../series/quant-infra.html">系列</a>
+        <a href="../about/">About</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <div class="article-layout">
+
+      <div class="article-content">
+        <a href="../index.html" class="back-link">← 返回</a>
+
+        <article>
+          <header class="article-header">
+            <div class="article-meta-row" style="margin-bottom:0.5rem;">
+              <span class="series-label">系列：量化数据基础设施从零到生产 · #5</span>
+            </div>
+            <h1>历史数据 10 亿行，45 分钟完成：代理池与并发设计</h1>
+            <div class="article-meta-row">
+              <span>2025-12</span>
+              <span class="sep">·</span>
+              <span>约 10 分钟</span>
+            </div>
+          </header>
+
+          <div class="article-body">
+
+            <p>产线上了线上实时采集之后，接下来要做的是把历史数据补全。KuCoin SPOT 的 1m K 线，最大可以追溯 4 年，约 220 个交易对，算下来大约 1.2 亿根 K 线，每次 API 请求最多拉 1500 根——需要 80000+ 次请求。</p>
+            <p>这篇记录从「跑三天」到「跑 45 分钟」的过程。</p>
+
+            <h2 id="baseline">第一次跑：单线程单 IP，估计需要三天</h2>
+
+            <p>最直接的实现：按交易对遍历，每个交易对按时间段分页拉取，逐一写入 S3。</p>
+            <p>KuCoin 的 rate limit 是 <code>2000 weight / 30s</code>，每次 candle 请求 weight=3，单 IP 上限约 <strong>22 req/s</strong>。80000 次请求 ÷ 22 req/s ≈ 60 分钟——但这是理论值，实际还要算上 HTTP 延迟、S3 写入时间、偶发的 429 退避。初步测试下来实际吞吐约 8–12 req/s，估计需要 2–3 天。</p>
+            <p>这个速度不可接受——每次新增一个交易所或数据类型，历史补数就要跑好几天。</p>
+
+            <h2 id="bottleneck">瓶颈在哪？</h2>
+
+            <p>单 IP 的问题是：<strong>rate limit 是绑定在 IP 上的</strong>。每个 IP 每 30 秒只能发 2000 weight。我们有单独的数据工程服务器，但所有请求都从同一个出口 IP 发出，所以无论怎么加线程、加进程，bottleneck 始终是这一个 IP 的配额。</p>
+
+            <p>解法直接：用多个 IP，每个 IP 各自有独立的配额。SOCKS5 代理池。</p>
+
+            <h2 id="proxy-pool">代理池设计</h2>
+
+            <p>我们购买了一批 SOCKS5 代理（住宅 IP），每个代理有独立的出口 IP。代理池需要解决三个问题：</p>
+            <ol>
+              <li><strong>分配</strong>：把并发的拉取任务均匀分配到不同代理，避免某个代理过热</li>
+              <li><strong>健康检查</strong>：代理会随机失效，要及时发现并隔离</li>
+              <li><strong>故障转移</strong>：某个代理返回 429 时，换另一个代理重试，而不是等待</li>
+            </ol>
+
+            <span class="code-label">代理池（简化版）</span>
+            <pre><code class="language-python">import asyncio
+import aiohttp
+from dataclasses import dataclass, field
+from collections import deque
+
+@dataclass
+class Proxy:
+    url: str           # "socks5://host:port"
+    failures: int = 0
+    in_use: bool = False
+
+class ProxyPool:
+    def __init__(self, proxy_urls: list[str], max_failures: int = 3):
+        self._proxies = deque([Proxy(url=u) for u in proxy_urls])
+        self._max_failures = max_failures
+        self._lock = asyncio.Lock()
+
+    async def acquire(self) -> Proxy | None:
+        async with self._lock:
+            for _ in range(len(self._proxies)):
+                proxy = self._proxies[0]
+                self._proxies.rotate(-1)
+                if not proxy.in_use and proxy.failures < self._max_failures:
+                    proxy.in_use = True
+                    return proxy
+        return None   # 所有代理都忙或故障
+
+    async def release(self, proxy: Proxy, success: bool) -> None:
+        async with self._lock:
+            proxy.in_use = False
+            if success:
+                proxy.failures = 0
+            else:
+                proxy.failures += 1
+                if proxy.failures >= self._max_failures:
+                    # 把失效代理移到末尾等待人工检查
+                    self._proxies.remove(proxy)
+                    self._proxies.append(proxy)
+
+    async def health_check(self, test_url: str = "https://api.kucoin.com/api/v1/timestamp"):
+        """定期健康检查，重置已恢复的代理。"""
+        async with aiohttp.ClientSession() as session:
+            for proxy in list(self._proxies):
+                try:
+                    async with session.get(
+                        test_url,
+                        proxy=proxy.url,
+                        timeout=aiohttp.ClientTimeout(total=5)
+                    ) as resp:
+                        if resp.status == 200:
+                            proxy.failures = 0
+                except Exception:
+                    proxy.failures = min(proxy.failures + 1, self._max_failures)</code></pre>
+
+            <h2 id="rate-limit-per-proxy">每个代理独立限流</h2>
+
+            <p>代理池解决了 IP 多样性，但每个 IP 自身仍然有 rate limit。从 <a href="rate-limit-redis-sliding-window.html">上一篇</a> 的经验来看，需要为每个代理维护独立的 Redis 限流 key，而不是共享一个全局 key。</p>
+
+            <span class="code-label">每代理独立 Redis key</span>
+            <pre><code class="language-python">from rate_limiter import RedisRateLimiter  # 上篇的实现
+
+def make_proxy_limiter(proxy_url: str, redis_client) -> RedisRateLimiter:
+    # 用代理 URL 的 hash 作为 Redis key 的命名空间
+    proxy_key = hashlib.md5(proxy_url.encode()).hexdigest()[:8]
+    return RedisRateLimiter(
+        redis_client=redis_client,
+        key=f"rate_limit:kucoin:{proxy_key}",
+        limit=1800,    # 留 10% 余量（KuCoin 上限 2000 weight/30s）
+        window=30,
+    )</code></pre>
+
+            <h2 id="concurrent-pipeline">并发拉取流水线</h2>
+
+            <p>任务的并发结构：把所有需要补全的（交易对, 时间段）对拆成独立任务，用 asyncio 并发执行，每个任务从代理池拿一个代理，拉完后归还。</p>
+
+            <span class="code-label">并发拉取主循环</span>
+            <pre><code class="language-python">async def fetch_one_chunk(
+    symbol: str,
+    start_ts: int,
+    end_ts: int,
+    proxy_pool: ProxyPool,
+    proxy_limiters: dict,
+    s3_client,
+) -> None:
+    proxy = None
+    while proxy is None:
+        proxy = await proxy_pool.acquire()
+        if proxy is None:
+            await asyncio.sleep(0.1)
+
+    limiter = proxy_limiters[proxy.url]
+    try:
+        await limiter.acquire(weight=3)
+        candles = await fetch_kucoin_candles(
+            symbol=symbol,
+            start_ts=start_ts,
+            end_ts=end_ts,
+            proxy=proxy.url,
+        )
+        if candles:
+            await write_to_s3(candles, symbol, start_ts, s3_client)
+        await proxy_pool.release(proxy, success=True)
+    except Exception as e:
+        await proxy_pool.release(proxy, success=False)
+        raise
+
+async def run_bulk_ingest(
+    symbols: list[str],
+    start_date: str,
+    end_date: str,
+    proxy_pool: ProxyPool,
+    proxy_limiters: dict,
+    s3_client,
+    concurrency: int = 64,
+):
+    tasks = generate_tasks(symbols, start_date, end_date)  # → list[(symbol, start_ts, end_ts)]
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def bounded_fetch(task):
+        async with semaphore:
+            await fetch_one_chunk(*task, proxy_pool, proxy_limiters, s3_client)
+
+    await asyncio.gather(*[bounded_fetch(t) for t in tasks], return_exceptions=True)</code></pre>
+
+            <h2 id="s3-then-clickhouse">S3 中转，再批量写 ClickHouse</h2>
+
+            <p>拉取结果先写 S3 Parquet，而不是直接插 ClickHouse，原因：</p>
+            <ul>
+              <li><strong>断点续跑</strong>：某批代理挂了或网络中断，已经写进 S3 的部分不需要重拉；下次从 S3 中未入库的文件继续入库。</li>
+              <li><strong>批次写入效率</strong>：ClickHouse 对批量写入更友好，每次插入几十万行比逐条插入快几个数量级。</li>
+              <li><strong>原始数据留存</strong>：S3 的 raw 层保留原始 JSON/Parquet，入库逻辑有 bug 时可以重新 replay，不需要再打 API。</li>
+            </ul>
+
+            <p>S3 按 <code>exchange/data_type/year/month/</code> 分区存储，文件命名包含 symbol 和时间范围，方便检查哪些段已经完成。</p>
+
+            <span class="code-label">S3 分区路径约定</span>
+            <pre><code class="language-python">def s3_key(exchange: str, symbol: str, bar: str, start_ts: int) -> str:
+    dt = datetime.utcfromtimestamp(start_ts / 1000)
+    return (
+        f"raw/{exchange}/kline/{bar}/"
+        f"{dt.year}/{dt.month:02d}/"
+        f"{symbol.replace('/', '_')}_{start_ts}.parquet"
+    )</code></pre>
+
+            <h2 id="result">结果</h2>
+
+            <p>32 个 SOCKS5 代理，每个代理约 22 req/s，理论峰值吞吐 <strong>32 × 22 = 704 req/s</strong>，实测约 <strong>710 req/s</strong>（有些代理延迟低，跑得快一些）。</p>
+
+            <p>KuCoin SPOT 4 年历史数据（约 220 个 symbol，1m K 线）：</p>
+
+            <table style="width:100%; border-collapse:collapse; font-size:0.85rem; margin: 1rem 0;">
+              <thead>
+                <tr style="border-bottom:1px solid var(--border); text-align:left;">
+                  <th style="padding:0.5rem 0.75rem; color:var(--text-muted);">方案</th>
+                  <th style="padding:0.5rem 0.75rem; color:var(--text-muted);">吞吐</th>
+                  <th style="padding:0.5rem 0.75rem; color:var(--text-muted);">耗时（估算）</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style="border-bottom:1px solid var(--border);">
+                  <td style="padding:0.5rem 0.75rem;">单线程单 IP</td>
+                  <td style="padding:0.5rem 0.75rem; font-family:var(--font-mono);">8–12 req/s</td>
+                  <td style="padding:0.5rem 0.75rem;">2–3 天</td>
+                </tr>
+                <tr>
+                  <td style="padding:0.5rem 0.75rem;">32 代理 + 并发</td>
+                  <td style="padding:0.5rem 0.75rem; font-family:var(--font-mono);">~710 req/s</td>
+                  <td style="padding:0.5rem 0.75rem; font-weight:600;">约 45 分钟</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <p>S3 写入 → ClickHouse 批量导入约额外 30 分钟（ClickHouse 的 S3 table function 直接读取，不需要本地中转）。</p>
+
+            <h2 id="pitfalls">踩过的坑</h2>
+            <ul>
+              <li><strong>代理质量差异大</strong>：30% 的代理会随机返回连接超时，要把 <code>max_failures</code> 调低，快速隔离差代理，而不是无限重试。</li>
+              <li><strong>同一代理的并发数不能太高</strong>：单个代理同时发 10+ 个请求，即使 weight 没超，也容易触发交易所的连接数限制（不同于 weight limit）。每代理并发数控制在 3–5 比较稳。</li>
+              <li><strong>S3 小文件问题</strong>：每个时间段写一个文件，200 个 symbol × 时间分段会产生几万个小文件。入 ClickHouse 前先用 PyArrow 合并到合理大小（每文件 100MB 左右）。</li>
+              <li><strong>时区对齐</strong>：KuCoin 的时间戳是 UTC，但历史接口的 <code>startAt</code>/<code>endAt</code> 参数是秒级而不是毫秒级，和 Binance 的毫秒级接口混用时容易出 bug。</li>
+            </ul>
+
+          </div>
+        </article>
+
+        <nav class="series-nav" aria-label="系列导航">
+          <a href="clickhouse-for-quant-data.html" class="series-nav-item prev">
+            <div class="nav-direction">← 上一篇</div>
+            <div class="nav-title">ClickHouse 在量化数据场景的选型与实践</div>
+          </a>
+          <a href="symbol-lifecycle.html" class="series-nav-item next">
+            <div class="nav-direction">下一篇 →</div>
+            <div class="nav-title">交易对上下架：比你想象中更难的运营问题</div>
+          </a>
+        </nav>
+
+      </div>
+
+      <aside class="article-toc">
+        <div class="toc">
+          <div class="toc-title">目录</div>
+          <ul class="toc-list">
+            <li><a href="#baseline">第一次跑：估计三天</a></li>
+            <li><a href="#bottleneck">瓶颈在哪</a></li>
+            <li><a href="#proxy-pool">代理池设计</a></li>
+            <li><a href="#rate-limit-per-proxy">每代理独立限流</a></li>
+            <li><a href="#concurrent-pipeline">并发拉取流水线</a></li>
+            <li><a href="#s3-then-clickhouse">S3 中转 → ClickHouse</a></li>
+            <li><a href="#result">结果</a></li>
+            <li><a href="#pitfalls">踩过的坑</a></li>
+          </ul>
+        </div>
+      </aside>
+
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p><a href="../index.html">← 返回首页</a> &nbsp;·&nbsp; <a href="mailto:aaliyahzhao@outlook.com">aaliyahzhao@outlook.com</a></p>
+    </div>
+  </footer>
+</body>
+</html>

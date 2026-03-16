@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>交易对上下架：比你想象中更难的运营问题</title>
+  <meta name="description" content="10 个交易所，每年数百个交易对上下架。YAML + Git + 自动 PR 合并 + Slack 审批，记录一套符号生命周期管理方案。" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../css/style.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script>hljs.highlightAll();</script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <h1 class="site-title"><a href="../index.html">Tongtong Zhao</a></h1>
+      <nav class="nav">
+        <a href="../index.html#writing">文章</a>
+        <a href="../series/quant-infra.html">系列</a>
+        <a href="../about/">About</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <div class="article-layout">
+
+      <div class="article-content">
+        <a href="../index.html" class="back-link">← 返回</a>
+
+        <article>
+          <header class="article-header">
+            <div class="article-meta-row" style="margin-bottom:0.5rem;">
+              <span class="series-label">系列：量化数据基础设施从零到生产 · #6</span>
+            </div>
+            <h1>交易对上下架：比你想象中更难的运营问题</h1>
+            <div class="article-meta-row">
+              <span>2025-12</span>
+              <span class="sep">·</span>
+              <span>约 9 分钟</span>
+            </div>
+          </header>
+
+          <div class="article-body">
+
+            <p>数据管道上线稳定运行之后，有个问题慢慢浮现出来：交易所每周都在上新的交易对，也在下架旧的。我们如果不及时更新采集列表，就会漏掉新币的历史数据，或者继续对已下架的交易对发请求（浪费配额，偶尔还会触发错误告警）。</p>
+            <p>管 1 个交易所还好，手动维护一个 YAML 文件就行。管 10 个交易所，每个交易所每年上下架几十到几百个交易对，就必须有一套系统来处理。</p>
+
+            <h2 id="scale">规模感受：一年多少变更？</h2>
+
+            <p>以实际数据为例，我们接入了 10 个交易所（Binance、Bybit、OKX、KuCoin、Bitget、Gate、Coinbase、Hyperliquid 等）。大致统计下来：</p>
+            <ul>
+              <li>Binance Futures：每月新增永续合约 10–30 个，下架 5–10 个</li>
+              <li>Hyperliquid：上线节奏更快，每月新增 20–50 个</li>
+              <li>Gate：Symbol 数量多，变化最频繁</li>
+            </ul>
+            <p>合计算下来，全部交易所加起来每年大约有 500–1000 次 symbol 变更。手动维护的成本已经超出了合理范围，而且容易出错——漏掉一个新 symbol，可能就错过了这个交易对上线初期的行情数据（往往是最有信号价值的时段）。</p>
+
+            <h2 id="what-goes-wrong">不管的话，什么会出错？</h2>
+
+            <p>两类问题：</p>
+            <ol>
+              <li><strong>新 symbol 漏采</strong>：某个新上线的永续合约，在上线后的前几天往往有异常高的资金费率和交易量，对研究很有价值。如果没有及时加入采集列表，这段历史数据就永远没了。</li>
+              <li><strong>已下架 symbol 继续请求</strong>：交易所返回 404 或 <code>{"code": "400100", "msg": "Invalid symbol"}</code>，这些错误会淹没真正有用的告警，也会浪费 rate limit 配额。</li>
+            </ol>
+
+            <h2 id="yaml-as-source-of-truth">YAML 作为 source of truth</h2>
+
+            <p>每个交易所维护一个 YAML 文件，记录当前应该采集哪些 symbol、哪些 bar 粒度、以及特殊配置（如某个 symbol 的历史数据只到某个日期）。</p>
+
+            <span class="code-label">symbols/binance_futures.yaml（结构示例）</span>
+            <pre><code class="language-yaml">exchange: binance
+market: futures
+updated_at: "2025-11-20"
+
+symbols:
+  - symbol: BTCUSDT
+    bars: [1m, 5m, 1h, 1d]
+    active: true
+    listed_at: "2019-09-25"
+
+  - symbol: ETHUSDT
+    bars: [1m, 5m, 1h, 1d]
+    active: true
+    listed_at: "2019-11-11"
+
+  - symbol: SOLUSDT
+    bars: [1m, 1h, 1d]
+    active: true
+    listed_at: "2021-08-20"
+
+  # 已下架的 symbol 不删除，标记 active: false，保留历史记录
+  - symbol: LUNA2USDT
+    bars: [1m, 1h]
+    active: false
+    listed_at: "2022-05-28"
+    delisted_at: "2023-09-12"</code></pre>
+
+            <p>这个文件本身就是完整的变更历史——通过 <code>listed_at</code>/<code>delisted_at</code> 字段，可以重建任意时间点的采集列表，也可以在补历史数据时精确定位每个 symbol 的有效时间段。</p>
+
+            <h2 id="sync-flow">自动同步流程</h2>
+
+            <p>一个 Prefect flow 每天定时运行，拉取各交易所最新的 symbol 列表，与 YAML 对比，生成 diff：</p>
+
+            <span class="code-label">同步逻辑（简化版）</span>
+            <pre><code class="language-python">from prefect import flow, task
+from datetime import date
+
+@task
+def fetch_exchange_symbols(exchange: str) -> set[str]:
+    """从交易所 API 拉取当前所有活跃 symbol。"""
+    ...
+
+@task
+def load_yaml_symbols(exchange: str) -> dict:
+    """读取本地 YAML，返回 {symbol: metadata}。"""
+    ...
+
+@task
+def compute_diff(current: set, yaml_symbols: dict) -> dict:
+    yaml_active = {s for s, m in yaml_symbols.items() if m.get("active", True)}
+    return {
+        "new": current - yaml_active,        # 交易所有、YAML 没有 → 新增
+        "delisted": yaml_active - current,   # 交易所没有、YAML 有 → 疑似下架
+    }
+
+@flow
+def symbol_sync_flow(exchange: str):
+    current = fetch_exchange_symbols(exchange)
+    yaml_data = load_yaml_symbols(exchange)
+    diff = compute_diff(current, yaml_data)
+
+    if diff["new"]:
+        create_pr_for_new_symbols(exchange, diff["new"])
+
+    if diff["delisted"]:
+        notify_slack_for_delist_review(exchange, diff["delisted"])</code></pre>
+
+            <h2 id="pr-workflow">PR 工作流：新增自动合并，下架需审批</h2>
+
+            <p>diff 生成后走两条不同的路径：</p>
+
+            <h3 id="auto-merge">新增 symbol：自动 PR + 自动合并</h3>
+            <p>新 symbol 只是增加采集，风险低。流程：</p>
+            <ol>
+              <li>脚本自动更新 YAML，commit，向主分支提一个 PR</li>
+              <li>PR 标题自动生成（如 <code>auto: add PEPEUSDT, WIFUSDT to binance_futures [2025-11-20]</code>）</li>
+              <li>GitHub Actions 检测到 <code>auto:</code> 前缀的 PR，检查只改了 YAML 文件且只有新增操作，自动合并</li>
+              <li>合并后发 Slack 通知 <code>#data-ops</code> 频道，告知新增了哪些 symbol</li>
+            </ol>
+
+            <span class="code-label">GitHub Actions 自动合并（仅限 auto: 前缀的纯新增 PR）</span>
+            <pre><code class="language-yaml">name: Auto merge symbol additions
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    paths:
+      - 'symbols/*.yaml'
+
+jobs:
+  auto-merge:
+    runs-on: ubuntu-latest
+    if: startsWith(github.event.pull_request.title, 'auto:')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check only additions (no deletions or active→false)
+        run: |
+          python scripts/check_pr_is_additions_only.py
+
+      - name: Auto merge
+        uses: pascalgn/automerge-action@v0.16.4
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MERGE_METHOD: squash</code></pre>
+
+            <h3 id="delist-review">下架 symbol：Slack 通知 + 人工审批</h3>
+            <p>下架操作有更大风险：把 <code>active: true</code> 改成 <code>active: false</code> 意味着停止采集，如果判断错误（比如交易所只是 API 临时抖动），会产生数据缺口。所以下架走人工审批：</p>
+            <ol>
+              <li>Slack bot 发消息到 <code>#data-ops</code>：「检测到以下 symbol 在 Binance 已下架：XXXUSDT。请确认后回复 ✅ 执行下架，或 ❌ 忽略。」</li>
+              <li>人工确认后，bot 自动更新 YAML 并提 PR，无需再次审批直接合并</li>
+              <li>同时触发补全该 symbol 下架前最后一段历史数据的任务</li>
+            </ol>
+
+            <h2 id="prefect-reads-yaml">Prefect 从 YAML 读取采集列表</h2>
+
+            <p>数据采集的 Prefect flow 在每次运行时从 Git 仓库读取最新的 YAML，而不是把 symbol 列表硬编码在代码里。这样 YAML 合并后，下次 flow 触发时自动生效，不需要改代码或重新部署。</p>
+
+            <span class="code-label">Prefect flow 读取 YAML 采集列表</span>
+            <pre><code class="language-python">import yaml
+from pathlib import Path
+
+def load_active_symbols(exchange: str, market: str) -> list[dict]:
+    yaml_path = Path(f"symbols/{exchange}_{market}.yaml")
+    with yaml_path.open() as f:
+        data = yaml.safe_load(f)
+    return [s for s in data["symbols"] if s.get("active", True)]
+
+@flow
+def kline_ingest_flow(exchange: str, market: str, bar: str):
+    symbols = load_active_symbols(exchange, market)
+    for sym in symbols:
+        fetch_and_write_kline(
+            exchange=exchange,
+            symbol=sym["symbol"],
+            bar=bar,
+        )</code></pre>
+
+            <h2 id="pitfalls">几个实际问题</h2>
+            <ul>
+              <li><strong>交易所 API 并不总是准确</strong>：有些交易所在 <code>GET /exchangeInfo</code> 里标注 <code>status: TRADING</code> 的 symbol 实际上已经停止撮合（只是不下架），这类 symbol 发 K 线请求会返回空数据。需要额外检测「连续 N 天数据全空」的情况，单独标记。</li>
+              <li><strong>symbol 命名变更</strong>：OKX 曾经把一批合约的命名格式从 <code>BTC-USDT-SWAP</code> 改成 <code>BTC-USDT-PERP</code>（历史 API 和现行 API 的格式不一样），导致对比时完全对不上。需要维护一张 alias 表。</li>
+              <li><strong>delist 和 symbol 暂停的区别</strong>：交易所可能暂停某个 symbol 的交易（维护或流动性问题），不代表永久下架。下架审批流程要加「冷静期」——连续 3 天检测到下架才触发通知，避免单次 API 抖动误判。</li>
+            </ul>
+
+          </div>
+        </article>
+
+        <nav class="series-nav" aria-label="系列导航">
+          <a href="bulk-ingest-proxy-pool.html" class="series-nav-item prev">
+            <div class="nav-direction">← 上一篇</div>
+            <div class="nav-title">历史数据 10 亿行，45 分钟完成：代理池与并发设计</div>
+          </a>
+          <a href="onchain-polymarket-pipeline.html" class="series-nav-item next">
+            <div class="nav-direction">下一篇 →</div>
+            <div class="nav-title">链上数据接入：Polymarket 从 subgraph 到 ClickHouse 的完整流程</div>
+          </a>
+        </nav>
+
+      </div>
+
+      <aside class="article-toc">
+        <div class="toc">
+          <div class="toc-title">目录</div>
+          <ul class="toc-list">
+            <li><a href="#scale">规模感受</a></li>
+            <li><a href="#what-goes-wrong">不管的话会怎样</a></li>
+            <li><a href="#yaml-as-source-of-truth">YAML 作为 source of truth</a></li>
+            <li><a href="#sync-flow">自动同步流程</a></li>
+            <li><a href="#pr-workflow">PR 工作流</a></li>
+            <li class="toc-h3"><a href="#auto-merge">新增：自动合并</a></li>
+            <li class="toc-h3"><a href="#delist-review">下架：人工审批</a></li>
+            <li><a href="#prefect-reads-yaml">Prefect 读取 YAML</a></li>
+            <li><a href="#pitfalls">实际问题</a></li>
+          </ul>
+        </div>
+      </aside>
+
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p><a href="../index.html">← 返回首页</a> &nbsp;·&nbsp; <a href="mailto:aaliyahzhao@outlook.com">aaliyahzhao@outlook.com</a></p>
+    </div>
+  </footer>
+</body>
+</html>

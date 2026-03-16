@@ -75,6 +75,46 @@
           </li>
 
           <li>
+            <a href="articles/onchain-polymarket-pipeline.html">链上数据接入：Polymarket 从 subgraph 到 ClickHouse 的完整流程</a>
+            <div class="article-meta-row">
+              <span>2025-12</span>
+              <span class="sep">·</span>
+              <span><a href="series/quant-infra.html" style="color:var(--text-muted);">量化数据基础设施系列</a></span>
+            </div>
+            <div class="summary">Polymarket 链上数据的接入全过程：subgraph cursor 分页、增量同步 checkpoint 设计、S3 暂存、ClickHouse 入库，以及价格边界、成交量环比等数据质量检验。</div>
+          </li>
+
+          <li>
+            <a href="articles/symbol-lifecycle.html">交易对上下架：比你想象中更难的运营问题</a>
+            <div class="article-meta-row">
+              <span>2025-12</span>
+              <span class="sep">·</span>
+              <span><a href="series/quant-infra.html" style="color:var(--text-muted);">量化数据基础设施系列</a></span>
+            </div>
+            <div class="summary">10 个交易所每年数百次 symbol 变更，手动维护迟早出错。YAML 作为 source of truth，Git PR 工作流：新增 symbol 自动合并，下架走 Slack 审批，Prefect 动态读取配置。</div>
+          </li>
+
+          <li>
+            <a href="articles/bulk-ingest-proxy-pool.html">历史数据 10 亿行，45 分钟完成：代理池与并发设计</a>
+            <div class="article-meta-row">
+              <span>2025-12</span>
+              <span class="sep">·</span>
+              <span><a href="series/quant-infra.html" style="color:var(--text-muted);">量化数据基础设施系列</a></span>
+            </div>
+            <div class="summary">单 IP 单线程跑历史数据补全需要三天，瓶颈是 rate limit 绑定 IP。32 个 SOCKS5 代理 + 每代理独立 Redis 限流 key + asyncio 并发：从 22 req/s 到 710 req/s，KuCoin 4 年 SPOT 数据 45 分钟完成。</div>
+          </li>
+
+          <li>
+            <a href="articles/clickhouse-for-quant-data.html">ClickHouse 在量化数据场景的选型与实践</a>
+            <div class="article-meta-row">
+              <span>2025-12</span>
+              <span class="sep">·</span>
+              <span><a href="series/quant-infra.html" style="color:var(--text-muted);">量化数据基础设施系列</a></span>
+            </div>
+            <div class="summary">Postgres 500M 行查询 30 秒，迁移 ClickHouse 后降到 0.3 秒。记录 ReplacingMergeTree 的幂等写入原理、按月分区设计、主键字段顺序取舍，以及 TTL 自动清理。</div>
+          </li>
+
+          <li>
             <a href="articles/what-does-quant-de-do.html">量化公司的数据工程师在做什么</a>
             <div class="article-meta-row">
               <span>2025-09</span>
