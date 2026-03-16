@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>从零为一家公司搭建线上数据管道</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../css/style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <h1 class="site-title"><a href="../index.html">Blog</a></h1>
+      <nav class="nav">
+        <a href="../index.html">首页</a>
+        <a href="../index.html#articles">文章</a>
+        <a href="../index.html#tech">技术栈</a>
+        <a href="../index.html#about">About</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <a href="../index.html#articles" class="back-link">← 返回文章列表</a>
+
+    <article>
+      <header class="article-header">
+        <h1>从零为一家公司搭建线上数据管道</h1>
+        <div class="meta">数据工程 · 架构 · 从零搭建</div>
+      </header>
+
+      <div class="article-body">
+        <div class="recruiter-tldr">
+          <p><strong>给招聘方 / 非技术面试官：</strong> 本文对应简历中的「从零参与搭建线上数据管道」。讲的是如何把多家交易所、多种类型的数据（K 线、资金费率等）稳定、及时地接进公司内部，并设计存储与限流，保证数据完整、可追溯。一句话：<strong>从零搭了一套多源、及时、完整、可追溯的量化数据入湖体系。</strong></p>
+        </div>
+
+        <p>本文总结在一家量化公司从零参与搭建线上数据管道的思路：从需求与目标到数据源、架构选型、表设计、可靠性设计，再到上线与迭代。面试时可直接用来回答「你如何从零搭建一套数据体系」。</p>
+
+        <h2>1. 需求与目标</h2>
+        <p>先明确业务要什么：量化研究需要哪些数据、更新频率、历史深度、一致性要求。例如：多交易所 K 线/行情/资金费率/持仓量，部分链上或宏观数据；实时或准实时（分钟级/小时级）；需要能回溯历史、支持离线补数。目标可以概括为：<strong>多源、及时、完整、可追溯</strong>。</p>
+
+        <h2>2. 数据源与更新频率</h2>
+        <p>列出所有数据源（如 Binance、Bybit、OKX、Glassnode 等），每个接口的 rate limit、推荐拉取间隔、数据量级。这一步直接决定后面调度策略和存储规划。不同交易所 API 差异大，需要统一抽象成「数据源 + endpoint + 更新频率」便于编排。</p>
+
+        <h2>3. 架构选型：调度与存储</h2>
+        <p><strong>调度与编排</strong>：我们选用 Prefect，每个 endpoint 对应一个 flow，按 cron/interval 调度，便于限流和独立重跑。<strong>存储</strong>：ClickHouse 作为统一分析型存储，按库/表做分区；原始数据可先落 S3 再入 ClickHouse，或直接写库，视延迟与成本权衡。</p>
+
+        <h2>4. 表设计与分区</h2>
+        <p>按业务域建表（如 kline、funding_rate、open_interest），主键与分区键设计要兼顾写入与查询（常见按时间 + 交易所/交易对）。注意 TTL 与保留策略，避免存储无限膨胀。</p>
+
+        <h2>5. 限流、重试与监控</h2>
+        <p>每个 flow 内对 API 调用做 rate limit，失败时重试 + backoff；保证「上游拉取成功后，下游写入通过重试完成」，避免半截数据。用 Prefect 的 run 状态和日志做监控与告警，能快速定位是哪个 endpoint/flow 出问题。</p>
+
+        <h2>6. 上线与迭代</h2>
+        <p>先上核心数据源与核心表，再逐步扩展；历史数据用离线任务补全，与在线流在 schema 和幂等写入上保持一致。后续可迭代：更多数据源、更细粒度监控、数据质量校验与告警等。</p>
+
+        <p>这样一套流程下来，就形成「从零搭建线上数据」的完整叙事，面试时可按上述结构展开，并结合你实际做过的细节（如具体表结构、某个交易所的限流策略）会更有说服力。</p>
+
+        <div class="interview-one-liner">
+          <strong>面试一句话：</strong> 我在量化公司从零参与搭建了多交易所数据入湖管道，覆盖需求、架构选型、表设计、限流与重试；保证数据及时、完整、可追溯，并用统一调度与监控支持独立重跑与告警。
+        </div>
+      </div>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p><a href="../index.html">返回首页</a></p>
+    </div>
+  </footer>
+</body>
+</html>

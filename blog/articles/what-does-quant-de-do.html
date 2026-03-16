@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>量化公司里的数据工程师在做什么？</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../css/style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <h1 class="site-title"><a href="../index.html">Blog</a></h1>
+      <nav class="nav">
+        <a href="../index.html">首页</a>
+        <a href="../index.html#articles">文章</a>
+        <a href="../index.html#tech">技术栈</a>
+        <a href="../index.html#about">About</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <a href="../index.html#articles" class="back-link">← 返回文章列表</a>
+
+    <article>
+      <header class="article-header">
+        <h1>量化公司里的数据工程师在做什么？</h1>
+        <div class="meta">入门 · 给毫无背景的面试官</div>
+      </header>
+
+      <div class="article-body">
+        <p>如果你不是量化或数据行业出身，可能很难从简历上看出「多交易所数据入湖」「ClickHouse」「Prefect」到底在解决什么问题。这篇文章用尽量少的技术词，讲清楚：<strong>量化公司需要什么数据、数据从哪来、数据工程师负责什么、以及这类能力在别的行业为什么也有用。</strong></p>
+
+        <h2>量化公司需要什么数据？</h2>
+        <p>量化团队做的是「用数据和模型做交易决策」。他们需要的典型数据包括：</p>
+        <ul>
+          <li><strong>行情</strong>：价格、成交量、K 线（按分钟/小时聚合的蜡烛图）—— 来自各大交易所（如 Binance、OKX、Bybit 等）。</li>
+          <li><strong>衍生品相关</strong>：资金费率、持仓量、多空比等 —— 同样是交易所提供，但接口和格式每家都不一样。</li>
+          <li><strong>链上 / 另类数据</strong>：例如预测市场 Polymarket 的成交记录、某些钱包的链上行为、社交情绪指标等 —— 来源更杂，有的要爬、有的要接第三方 API。</li>
+        </ul>
+        <p>这些数据有一个共同点：<strong>来自很多个源头，格式不统一，而且每个源头都有限制（比如「每分钟最多问 100 次」），超了会封 IP 或拒绝服务。</strong> 公司内部又希望「随时能查到完整、及时、一致的数据」—— 这就需要有人把「多源、受限、杂乱」变成「统一、稳定、可查」。</p>
+
+        <h2>数据从哪来？谁在「接」？</h2>
+        <p>数据来自交易所的公开 API、第三方数据商、链上索引服务等。每一个源都有各自的规则：</p>
+        <ul>
+          <li>有的按「请求次数」限流，有的按「权重」限流（一次请求可能算 5 点权重，每分钟只能花 2400 点）；</li>
+          <li>有的只给最近一段时间的数据，要历史得走另一套「历史数据」接口；</li>
+          <li>有的返回 JSON，有的要自己解析成表格再存。</li>
+        </ul>
+        <p><strong>数据工程师做的工作，可以类比成「接水管」：</strong> 数据像水，从各个交易所、数据商「流」出来；我们的任务是修好管道（统一接口、限流、重试）、建好水池（数据库 / 数据仓库），让水稳定地流进来、存好、不丢、随时能取用。如果某根管子超量取水（超过 rate limit），整条线可能被掐断，所以还要做「统一排队」—— 所有任务共享一个限流池，避免超限。</p>
+
+        <h2>具体会做哪些事？</h2>
+        <p>可以概括成四块：</p>
+        <ol>
+          <li><strong>接进来</strong>：把多家交易所、多种数据类型的 API 抽象成统一的「数据源 + 端点 + 更新频率」，写拉取逻辑、限流、重试。这样新增一个交易所或一种数据时，不用重写整套逻辑。</li>
+          <li><strong>存好</strong>：设计表结构、分区、去重规则，让数据能按时间、按交易所或交易对高效查询；历史数据往往先落对象存储（如 S3），再批量导入分析库（如 ClickHouse），和实时流在格式上保持一致。</li>
+          <li><strong>不丢</strong>：用调度系统（如 Prefect）定时跑拉取任务，失败自动重试；监控任务状态和日志，一旦发现缺口就告警或触发补数。</li>
+          <li><strong>能查、能维护</strong>：交易对会上下架，需要有一套「符号管理」—— 从交易所同步最新列表，用配置（如 YAML + Git）和审批流程管理变更，重要变更推送到 Slack 等，避免误删或漏加。</li>
+        </ol>
+        <p>所以，<strong>一句话：数据工程师让策略和研究团队随时能用上完整、及时、可靠的多源数据，并且保证「能拉到就不丢」、可追溯、可重跑。</strong></p>
+
+        <h2>和「一般公司」的数据工作有什么共通点？</h2>
+        <p>量化场景里练出来的能力，在很多行业都能复用：</p>
+        <ul>
+          <li><strong>多数据源</strong>：电商、广告、风控同样要接很多外部 API 或内部系统，格式不一、限流不一，需要统一抽象和限流。</li>
+          <li><strong>实时 / 准实时</strong>：对延迟和新鲜度有要求，需要调度、重试和监控。</li>
+          <li><strong>可靠性</strong>：重试、幂等写入、补数逻辑，保证数据一致、不丢。</li>
+          <li><strong>从零搭管道</strong>：从需求到架构、表设计、上线与迭代，和从零搭数仓/数据平台的思路是一致的。</li>
+        </ul>
+        <p>如果你在招「数据工程师」或「数据平台」相关岗位，即使不是量化行业，也可以把上述能力看作「多源数据接入与入湖、可靠性与可观测性」—— 我在这方面的实践都写在技术博客里，欢迎通过简历或 About 里的联系方式进一步交流。</p>
+
+        <div class="interview-one-liner">
+          <strong>面试一句话（给非量化岗位）：</strong> 我在量化公司从零参与搭建了多交易所、多类型数据的入湖管道，负责「接进来、存好、不丢、能查」；这套能力——多数据源统一接入、限流与重试、调度与监控、从零搭管道——在电商、广告、风控等需要多源实时数据的场景都可以复用。
+        </div>
+      </div>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p><a href="../index.html">返回首页</a></p>
+    </div>
+  </footer>
+</body>
+</html>

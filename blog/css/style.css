@@ -1,0 +1,308 @@
+/* Personal tech blog - Data Engineering focus */
+:root {
+  --bg: #0d1117;
+  --surface: #161b22;
+  --border: #30363d;
+  --text: #e6edf3;
+  --text-muted: #8b949e;
+  --accent: #58a6ff;
+  --accent-soft: rgba(88, 166, 255, 0.15);
+  --green: #3fb950;
+  --font-sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", "Consolas", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  font-size: 16px;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+.container {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 0 1.25rem;
+}
+
+/* ----- Header ----- */
+.site-header {
+  border-bottom: 1px solid var(--border);
+  padding: 1rem 0;
+  margin-bottom: 2rem;
+}
+.site-header .container {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.site-title {
+  font-weight: 600;
+  font-size: 1.1rem;
+  margin: 0;
+}
+.site-title a {
+  color: var(--text);
+}
+.site-title a:hover {
+  text-decoration: none;
+  color: var(--accent);
+}
+.nav a {
+  margin-left: 1.25rem;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+}
+.nav a:hover {
+  color: var(--text);
+}
+
+/* ----- Hero ----- */
+.hero {
+  padding: 2rem 0 2.5rem;
+  border-bottom: 1px solid var(--border);
+}
+.hero h1 {
+  font-size: 1.75rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+  letter-spacing: -0.02em;
+}
+.hero .tagline {
+  color: var(--text-muted);
+  font-size: 1rem;
+  margin: 0;
+}
+
+/* ----- Section ----- */
+.section {
+  padding: 2rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.section:last-of-type {
+  border-bottom: none;
+}
+.section-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0 0 1rem;
+}
+
+/* ----- Highlights (bullets) ----- */
+.highlights {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.highlights li {
+  padding: 0.35rem 0;
+  padding-left: 1.25rem;
+  position: relative;
+}
+.highlights li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.65rem;
+  width: 6px;
+  height: 6px;
+  background: var(--accent);
+  border-radius: 50%;
+}
+.highlights li strong {
+  color: var(--text);
+}
+
+/* ----- Article list ----- */
+.article-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.article-list li {
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.article-list li:last-child {
+  border-bottom: none;
+}
+.article-list a {
+  color: var(--text);
+  font-weight: 500;
+}
+.article-list a:hover {
+  color: var(--accent);
+  text-decoration: none;
+}
+.article-meta {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+}
+.article-list .summary {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  margin-top: 0.35rem;
+  line-height: 1.5;
+}
+
+/* ----- Tech stack ----- */
+.tech-intro {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  margin: 0 0 1rem;
+  line-height: 1.5;
+}
+.tech-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.tech-tags li {
+  background: var(--accent-soft);
+  color: var(--accent);
+  padding: 0.35rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-family: var(--font-mono);
+}
+
+/* ----- About ----- */
+.about p {
+  margin: 0 0 0.75rem;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+}
+.about p:last-child {
+  margin-bottom: 0;
+}
+
+/* ----- Footer ----- */
+.site-footer {
+  padding: 2rem 0;
+  margin-top: 2rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+.site-footer a {
+  color: var(--text-muted);
+}
+.site-footer a:hover {
+  color: var(--accent);
+}
+
+/* ----- Article page ----- */
+.article-header {
+  padding: 1.5rem 0;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 1.5rem;
+}
+.article-header h1 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+}
+.article-header .meta {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+.article-body {
+  padding-bottom: 2rem;
+}
+.article-body h2 {
+  font-size: 1.2rem;
+  margin: 1.75rem 0 0.75rem;
+  color: var(--text);
+}
+.article-body h3 {
+  font-size: 1.05rem;
+  margin: 1.25rem 0 0.5rem;
+}
+.article-body p {
+  margin: 0 0 1rem;
+}
+.article-body ul, .article-body ol {
+  margin: 0 0 1rem;
+  padding-left: 1.5rem;
+}
+.article-body code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--surface);
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+.article-body pre {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1rem;
+  overflow-x: auto;
+  font-size: 0.85rem;
+}
+.article-body pre code {
+  background: none;
+  padding: 0;
+  border: none;
+}
+.back-link {
+  display: inline-block;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+.back-link:hover {
+  color: var(--accent);
+}
+
+/* ----- Recruiter / non-technical TL;DR ----- */
+.recruiter-tldr {
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  margin: 1rem 0 1.5rem;
+  font-size: 0.95rem;
+}
+.recruiter-tldr strong {
+  color: var(--accent);
+}
+.recruiter-tldr p {
+  margin: 0 0 0.5rem;
+}
+.recruiter-tldr p:last-child {
+  margin-bottom: 0;
+}
+.article-body .interview-one-liner {
+  margin-top: 1.5rem;
+  padding: 0.75rem 1rem;
+  background: var(--surface);
+  border-left: 4px solid var(--green);
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+.article-body .interview-one-liner strong {
+  color: var(--text);
+}

@@ -1,0 +1,8 @@
+{
+  "name": "personal-blog",
+  "private": true,
+  "scripts": {
+    "preview": "npx serve .",
+    "deploy": "firebase deploy --only hosting"
+  }
+}
