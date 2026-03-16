@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Crypto 量化数据全景：从市场行情到链上的工程笔记</title>
-  <meta name="description" content="系统梳理 crypto 量化公司涉及的数据类型，以及每类数据在实际接入时的工程细节和常见坑。" />
+  <title>Crypto 量化数据全景：策略、数据分类与工程笔记</title>
+  <meta name="description" content="从策略出发，系统梳理 crypto 量化涉及的六类数据——市场行情、衍生品、期权、链上、宏观、另类数据——以及每类数据的工程细节和常见坑。" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -12,6 +12,52 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
   <script>hljs.highlightAll();</script>
+  <style>
+    .tag-done {
+      display: inline-block;
+      font-size: 0.72rem;
+      font-family: var(--font-mono);
+      background: #1a3a1a;
+      color: #6fcf6f;
+      border: 1px solid #2d5a2d;
+      border-radius: 3px;
+      padding: 0.1em 0.45em;
+      vertical-align: middle;
+      margin-left: 0.3em;
+      white-space: nowrap;
+    }
+    .freshness-table td, .freshness-table th {
+      padding: 0.5rem 0.75rem;
+      font-size: 0.85rem;
+    }
+    .freshness-table tr { border-bottom: 1px solid var(--border); }
+    .freshness-table thead tr th { color: var(--text-muted); text-align: left; }
+    .dt-block {
+      border-left: 2px solid var(--border);
+      padding-left: 1rem;
+      margin: 1.25rem 0;
+    }
+    .dt-block h3 {
+      margin-bottom: 0.4rem;
+      font-size: 0.95rem;
+    }
+    .dt-block p, .dt-block ul {
+      margin: 0.3rem 0;
+      font-size: 0.9rem;
+      color: var(--text-muted);
+    }
+    .dt-block strong { color: var(--text); }
+    .note-eng {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 0.6rem 0.9rem;
+      margin: 0.5rem 0 0;
+      font-size: 0.82rem;
+      color: var(--text-muted);
+    }
+    .note-eng strong { color: var(--text); }
+  </style>
 </head>
 <body>
   <header class="site-header">
@@ -36,315 +82,398 @@
             <div class="article-meta-row" style="margin-bottom:0.5rem;">
               <span class="series-label">系列：量化数据基础设施从零到生产 · #2</span>
             </div>
-            <h1>Crypto 量化数据全景：从市场行情到链上的工程笔记</h1>
+            <h1>Crypto 量化数据全景：策略、数据分类与工程笔记</h1>
             <div class="article-meta-row">
               <span>2025-10</span>
               <span class="sep">·</span>
-              <span>约 12 分钟</span>
+              <span>约 15 分钟</span>
             </div>
           </header>
 
           <div class="article-body">
 
-            <p>量化公司要用的数据远不止 K 线。从交易所行情、衍生品指标、期权波动率，到链上交易记录和社交情绪，每一类数据背后都有独立的接入方式和工程细节。这篇文章梳理一下这张地图，以及每类数据在实际接入时遇到的真实问题。</p>
+            <p>理解「需要什么数据」之前，要先理解「在跑什么策略」。这篇从策略出发，把 crypto 量化涉及的数据系统梳理一遍——六大类，30+ 种具体数据类型——同时记录每类数据在工程接入时的细节和坑。</p>
 
-            <h2 id="map">数据全景</h2>
-            <p>大致可以分为六类：</p>
+            <h2 id="strategies">一、Crypto Quant 在做什么</h2>
 
-            <table style="width:100%; border-collapse:collapse; font-size:0.85rem; margin: 1rem 0;">
+            <p>策略决定数据需求。不同策略对数据的新鲜度、覆盖范围、历史深度要求完全不同：</p>
+
+            <table style="width:100%; border-collapse:collapse; font-size:0.83rem; margin: 1rem 0;">
               <thead>
-                <tr style="border-bottom:1px solid var(--border); text-align:left;">
-                  <th style="padding:0.5rem 0.75rem; color:var(--text-muted);">分类</th>
-                  <th style="padding:0.5rem 0.75rem; color:var(--text-muted);">典型数据</th>
-                  <th style="padding:0.5rem 0.75rem; color:var(--text-muted);">来源</th>
-                  <th style="padding:0.5rem 0.75rem; color:var(--text-muted);">接入方式</th>
+                <tr style="border-bottom:1px solid var(--border); text-align:left; color:var(--text-muted);">
+                  <th style="padding:0.5rem 0.75rem;">策略类型</th>
+                  <th style="padding:0.5rem 0.75rem;">核心逻辑</th>
+                  <th style="padding:0.5rem 0.75rem;">核心数据需求</th>
                 </tr>
               </thead>
               <tbody>
                 <tr style="border-bottom:1px solid var(--border);">
-                  <td style="padding:0.5rem 0.75rem; font-weight:500;">CEX 市场数据</td>
-                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">OHLCV、逐笔成交、Order Book</td>
-                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">Binance、OKX、Bybit 等</td>
-                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">REST / WebSocket</td>
+                  <td style="padding:0.5rem 0.75rem; font-weight:600;">Market Making</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">挂双边报价，赚 spread，控 inventory risk</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">Tick、L2/L3 order book、funding rate（持仓成本）</td>
                 </tr>
                 <tr style="border-bottom:1px solid var(--border);">
-                  <td style="padding:0.5rem 0.75rem; font-weight:500;">衍生品数据</td>
-                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">资金费率、持仓量、多空比、强平</td>
-                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">各 CEX 统计接口</td>
-                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">REST（定时拉）</td>
+                  <td style="padding:0.5rem 0.75rem; font-weight:600;">Funding Rate Arb</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">做多/空永续，赚资金费率，现货对冲敞口</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">多交易所 funding rate、spot 价格、borrow rate</td>
                 </tr>
                 <tr style="border-bottom:1px solid var(--border);">
-                  <td style="padding:0.5rem 0.75rem; font-weight:500;">期权数据</td>
-                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">IV、skew、PCR、term structure</td>
-                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">OKX priAPI、Deribit</td>
-                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">REST / WebSocket</td>
+                  <td style="padding:0.5rem 0.75rem; font-weight:600;">Cross-exchange Arb</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">同一币种在不同交易所的瞬时价差</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">多交易所 trade/order book、延迟监控</td>
                 </tr>
                 <tr style="border-bottom:1px solid var(--border);">
-                  <td style="padding:0.5rem 0.75rem; font-weight:500;">链上数据</td>
-                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">DEX 交易、钱包追踪、预测市场</td>
-                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">The Graph、RPC、Nansen</td>
-                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">GraphQL / JSON-RPC</td>
+                  <td style="padding:0.5rem 0.75rem; font-weight:600;">CTA / Trend Following</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">动量、均值回归等系统化策略</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">OHLCV、成交量、OI、funding rate</td>
                 </tr>
                 <tr style="border-bottom:1px solid var(--border);">
-                  <td style="padding:0.5rem 0.75rem; font-weight:500;">跨市场 / 宏观</td>
-                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">CME 期货、股票价格、美联储利率</td>
-                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">CME、XNAS、Databento</td>
-                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">REST / FTP</td>
+                  <td style="padding:0.5rem 0.75rem; font-weight:600;">Options / Vol Trading</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">波动率曲面交易、delta-neutral 对冲</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">IV surface、options chain、历史 realized vol</td>
+                </tr>
+                <tr style="border-bottom:1px solid var(--border);">
+                  <td style="padding:0.5rem 0.75rem; font-weight:600;">On-chain / DeFi</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">MEV、LP 流动性提供、链上套利</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">DEX swaps、mempool、链上状态</td>
+                </tr>
+                <tr style="border-bottom:1px solid var(--border);">
+                  <td style="padding:0.5rem 0.75rem; font-weight:600;">Prediction Market</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">对事件概率的定价</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">Polymarket 链上成交记录、流动性深度</td>
                 </tr>
                 <tr>
-                  <td style="padding:0.5rem 0.75rem; font-weight:500;">另类数据</td>
-                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">社交情绪、钱包标签、新闻事件</td>
-                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">LunarCrush、Nansen、Santiment</td>
-                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">REST</td>
+                  <td style="padding:0.5rem 0.75rem; font-weight:600;">Alt-data Driven</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">社交情绪、聪明钱行为预测价格</td>
+                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">LunarCrush、Nansen whale 钱包追踪</td>
                 </tr>
               </tbody>
             </table>
 
-            <p>下面按类逐一说工程细节。</p>
+            <h2 id="data-map">二、数据分类全景</h2>
 
-            <h2 id="ohlcv">K 线（OHLCV）：看起来最简单，坑最多</h2>
+            <h3 id="market-data">1. 市场数据（CEX）</h3>
 
-            <p>K 线是最基础的数据，也是最容易踩坑的地方，因为各交易所的接口行为差异很大。</p>
+            <div class="dt-block">
+              <h3>OHLCV / K 线 <span class="tag-done">已接入</span></h3>
+              <p><strong>来源：</strong>Binance、OKX、Bybit、Coinbase、KuCoin、Bitget、Gate、Hyperliquid — 历史 + 实时</p>
+              <p><strong>粒度：</strong>1m / 5m / 15m / 1h / 4h / 1d，各交易所均支持</p>
+              <p><strong>字段：</strong>open_time, open, high, low, close, volume, quote_volume, trades</p>
+              <div class="note-eng">
+                <strong>工程细节：</strong>OKX <code>/market/candles</code> 只返回最近 1440 根，超过需切到 <code>/market/history-candles</code>（不同接口路径、不同频率限制）。各交易所分页方向不统一——Binance 升序，OKX 降序，KuCoin Futures 升序而 KuCoin Spot 降序。时间戳单位：Binance/OKX 是毫秒，KuCoin 是秒。
+              </div>
+            </div>
 
-            <h3 id="ohlcv-window">历史窗口限制</h3>
-            <p>大多数交易所的 K 线接口只返回最近 N 根（Binance 是 1000，OKX 是 1440）。要拉更早的历史数据，要么分页往前翻，要么走专门的「历史归档」接口——但两者的 API 路径不同，返回格式也可能有差异。</p>
-            <p>OKX 的情况尤其典型：<code>/market/candles</code> 只能拿最近 1440 根，超过这个范围要切到 <code>/market/history-candles</code>。这两个接口的参数名相同，但 <code>history-candles</code> 对频率限制更严，且不支持实时数据，只能查历史。拉历史 K 线的代码如果不做自动路由，很容易在 1440 根处截断而不报错。</p>
+            <div class="dt-block">
+              <h3>Trade Data（逐笔成交）</h3>
+              <p><strong>来源：</strong>各交易所公开 API 提供最近 N 笔；历史 tick 数据用 <strong>Databento</strong>（专业来源，按月购买，MBO/MBP 格式，主要覆盖 CME 和部分 CEX）</p>
+              <p><strong>字段：</strong>trade_time, price, qty, side (taker buy/sell), trade_id</p>
+              <p><strong>用途：</strong>做市策略的核心输入；计算 taker buy/sell ratio（短期方向指标）；构建 VWAP</p>
+              <div class="note-eng">
+                <strong>工程细节：</strong>实时 tick 数据体量很大（BTC/USDT 高峰期每秒数千笔），不宜无差别存储。常见做法是只存聚合统计（每分钟 taker volume 比）或按需存原始 tick 并设短 TTL（90 天）。
+              </div>
+            </div>
 
-            <span class="code-label">OKX 历史 K 线自动路由（简化版）</span>
-            <pre><code class="language-python">REALTIME_MAX_BARS = 1440  # /market/candles 的上限
+            <div class="dt-block">
+              <h3>Order Book（L1 / L2 / L3）</h3>
+              <p><strong>L1：</strong>Best bid / best ask（最优报价），所有交易所均提供</p>
+              <p><strong>L2：</strong>价格档位 + 各档位总量（depth），通常返回 top 20/50/100 档</p>
+              <p><strong>L3：</strong>带 order ID 的逐笔挂单（订单级别），只有少数交易所提供（Coinbase Advanced、BTSE 等）</p>
+              <p><strong>用途：</strong>做市策略实时感知市场深度；套利策略判断可执行价差</p>
+              <div class="note-eng">
+                <strong>工程细节：</strong>Order book snapshot 体量极大，通常走 WebSocket 增量更新而不是 REST 轮询。本地维护 order book 状态需要处理 sequence number 校验和断连重建，是独立的工程问题。
+              </div>
+            </div>
 
-def fetch_okx_candles(inst_id: str, bar: str, start_ts: int, end_ts: int) -> list:
-    """
-    自动判断是否需要走 history-candles 接口。
-    start_ts, end_ts 均为毫秒时间戳。
-    """
-    now_ms = int(time.time() * 1000)
-    bar_ms = bar_to_milliseconds(bar)  # "1m" → 60_000
+            <div class="dt-block">
+              <h3>Ticker / Mark Price / Index Price</h3>
+              <p><strong>Ticker：</strong>实时行情快照（最新成交价、24h 涨跌、成交量）</p>
+              <p><strong>Mark Price：</strong>交易所合成的「公允价格」，用于计算未实现盈亏和强平价格，比最新成交价更稳定（加权多个来源）</p>
+              <p><strong>Index Price：</strong>多交易所加权合成的指数价，防止单一交易所价格被操纵（特别重要于期权定价）</p>
+              <div class="note-eng">
+                <strong>工程细节：</strong>Mark Price 和 Index Price 很多交易所走 WebSocket 推送，频率高（每秒多次），REST 轮询可能跟不上。对大多数非 HFT 策略，1 分钟 REST 快照已够。
+              </div>
+            </div>
 
-    # 如果请求范围超出 1440 根窗口，走 history-candles
-    cutoff_ms = now_ms - REALTIME_MAX_BARS * bar_ms
-    if start_ts < cutoff_ms:
-        endpoint = "/api/v5/market/history-candles"
-    else:
-        endpoint = "/api/v5/market/candles"
+            <h3 id="derivatives-data">2. 衍生品数据（Perps &amp; Futures）</h3>
 
-    return _paginate_candles(endpoint, inst_id, bar, start_ts, end_ts)</code></pre>
+            <div class="dt-block">
+              <h3>Funding Rate（资金费率）<span class="tag-done">已接入</span></h3>
+              <p><strong>来源：</strong>Binance、OKX、Bybit、KuCoin、Bitget、Gate、Hyperliquid</p>
+              <p><strong>结算频率：</strong>Binance/OKX 每 8 小时（00:00 / 08:00 / 16:00 UTC），Bybit/Hyperliquid 每小时</p>
+              <p><strong>字段：</strong>symbol, funding_time, funding_rate, (predicted_rate)</p>
+              <div class="note-eng">
+                <strong>工程细节：</strong>跨交易所对比时要先年化（<code>rate × 结算次数/天 × 365</code>），否则 Binance 的 8h 费率和 Bybit 的 1h 费率直接相减没有意义。「预测资金费率」和「已结算资金费率」来自不同接口——在结算前，交易所会实时计算当前期的预测值，一些策略需要这个而不是历史结算值。
+              </div>
+            </div>
 
-            <h3 id="ohlcv-direction">分页方向不统一</h3>
-            <p>Binance 的 K 线接口默认按时间<strong>升序</strong>返回；OKX 默认<strong>降序</strong>；KuCoin Spot 接口降序，而 KuCoin Futures 接口升序——同一家交易所的两个产品线行为相反。批量拉历史数据时，分页逻辑要单独处理，否则会漏数据或重复请求。</p>
+            <div class="dt-block">
+              <h3>Open Interest（持仓量，OI）<span class="tag-done">已接入</span></h3>
+              <p><strong>来源：</strong>各 CEX 的 futures stats 接口</p>
+              <p><strong>字段：</strong>symbol, timestamp, open_interest_value（USDT 计）, open_interest_amount（币本位）</p>
+              <p><strong>用途：</strong>OI 上升 + 价格上升 → 多方入场；OI 骤降 → 大量平仓（强平或主动）；OI 变化量有时比绝对值更有信号</p>
+              <div class="note-eng">
+                <strong>工程细节：</strong>注意 OI 的计价单位——同一个合约的 OI 可以用 USD、USDT、BTC 三种单位表示，跨交易所汇总时要统一到同一单位再加总。
+              </div>
+            </div>
 
-            <h3 id="ohlcv-ts">时间戳：左闭右开还是右闭</h3>
-            <p>一根 1 分钟 K 线的 <code>open_time</code> 是这根 K 线的开始时间（左闭），这是共识。但在用 <code>startTime</code>/<code>endTime</code> 做范围查询时，各家对边界的处理不完全一样。最稳妥的做法是请求时多留半根 K 线的缓冲，写入 ClickHouse 时用 <code>ReplacingMergeTree</code> 去重。</p>
+            <div class="dt-block">
+              <h3>Long/Short Ratio（多空比）<span class="tag-done">已接入</span></h3>
+              <p>三个口径，含义不同，<strong>不能混用</strong>：</p>
+              <ul>
+                <li><strong>全市场账户多空比（Account L/S Ratio）：</strong>所有用户中，净多账户 vs 净空账户数量。散户情绪代理，噪声大。</li>
+                <li><strong>顶级交易者仓位多空比（Top Trader Position Ratio）：</strong>头部用户的多头仓位量 vs 空头仓位量。大资金方向，信号质量更高。</li>
+                <li><strong>顶级交易者账户多空比（Top Trader Account Ratio）：</strong>头部用户中，净多账户 vs 净空账户数量。与上一个是不同统计维度。</li>
+              </ul>
+              <p>另有 <strong>Taker Buy/Sell Volume Ratio</strong>（主动买卖量比），反映短期市场主动方向，是第四个独立维度。</p>
+              <div class="note-eng">
+                <strong>工程细节：</strong>这四个指标要存在不同字段（或不同表），写入时加 <code>ratio_type</code> 枚举列区分。混在一起后期很难清理。OKX 提供全部四种口径，Binance 只提供前三种。
+              </div>
+            </div>
 
-            <h2 id="funding">资金费率：细节决定信号质量</h2>
+            <div class="dt-block">
+              <h3>Liquidations（强平）</h3>
+              <p><strong>来源：</strong>Binance WebSocket <code>forceOrder</code> stream、OKX WebSocket；历史数据较难拿全</p>
+              <p><strong>字段：</strong>symbol, side, price, qty, trade_time</p>
+              <p><strong>用途：</strong>爆仓瀑布预警——大量空头被强平往往伴随价格快速上涨，反之亦然；强平额骤升是短期波动率飙升的先行指标</p>
+              <div class="note-eng">
+                <strong>工程细节：</strong>Binance 的 liquidation WebSocket 只推送被强平的订单，不是实时完整的强平量统计。若要跨交易所汇总强平数据，Coinglass 等第三方平台有聚合 API。
+              </div>
+            </div>
 
-            <p>资金费率（Funding Rate）是永续合约特有的机制，用于锚定合约价格和现货价格。对量化策略来说，它既是成本（持仓要付/收资金费），也是信号（费率高低反映市场偏向）。</p>
+            <div class="dt-block">
+              <h3>Basis（基差）</h3>
+              <p><strong>定义：</strong>现货价格 vs 期货/永续合约价格的差值（永续合约通常称 premium），反映期限溢价和市场情绪</p>
+              <p><strong>计算方式：</strong><code>basis = (perp_price − spot_price) / spot_price × 100%</code></p>
+              <p><strong>用途：</strong>资金费套利的核心输入；高正基差通常对应高资金费率（多头付费给空头）</p>
+              <div class="note-eng">
+                <strong>工程细节：</strong>Basis 通常不需要专门接口，实时计算即可——从 spot 和 perp 的 mark price 做差。重点是确保两个来源的时间戳对齐，否则算出来的 basis 包含时间错位的噪声。
+              </div>
+            </div>
 
-            <h3 id="funding-timing">结算时间不对齐</h3>
-            <p>不同交易所的资金费率结算频率和时间点不同：</p>
+            <h3 id="options-data">3. 期权数据</h3>
 
-            <table style="width:100%; border-collapse:collapse; font-size:0.85rem; margin: 1rem 0;">
+            <div class="dt-block">
+              <h3>Implied Volatility（隐含波动率）<span class="tag-done">已接入（OKX priAPI）</span></h3>
+              <p><strong>来源：</strong>OKX priAPI（路径 <code>priapi/v5</code>，非官方公开文档）、Deribit API</p>
+              <p><strong>关键指标：</strong></p>
+              <ul>
+                <li><strong>ATM IV：</strong>平值期权的隐含波动率，「市场定价」的波动率基准</li>
+                <li><strong>IV Skew：</strong>虚值看跌期权 IV 与虚值看涨期权 IV 的差，反映市场对下跌风险的定价</li>
+                <li><strong>IV vs Historical Realized Vol：</strong>隐波 vs 历史实波的差（vol premium），是均值回归类波动率策略的核心信号</li>
+                <li><strong>Term Structure：</strong>不同到期日的 ATM IV 曲线，用于跨期日的套利和对冲</li>
+              </ul>
+              <div class="note-eng">
+                <strong>工程细节：</strong>OKX 公开 API（<code>api/v5</code>）提供的期权数据很有限，机构关注的 IV surface、skew 等指标在 priAPI 里，该接口无官方文档，需要抓包获取参数格式，且可能随时变更——要加 schema 版本记录和告警。Deribit 是 crypto 期权流动性最深的交易所，IV 数据通常以 Deribit 为基准。
+              </div>
+            </div>
+
+            <div class="dt-block">
+              <h3>Options Chain</h3>
+              <p><strong>来源：</strong>Deribit（主要）、OKX</p>
+              <p><strong>字段：</strong>strike, expiry, bid/ask, last_price, open_interest, delta, gamma, vega, theta</p>
+              <p><strong>用途：</strong>期权做市需要全链数据；delta-neutral 对冲需要实时 Greeks；构建 IV surface 需要所有 strike 的 IV 截面</p>
+              <div class="note-eng">
+                <strong>工程细节：</strong>期权链的 symbol 数量随到期日临近快速变化（每周到期导致 symbol 频繁新增/下架）；strike 之间间距随 BTC 价格区间动态调整。标准化存储需要把 strike/expiry 从 symbol 字符串里解析出来单独存列。
+              </div>
+            </div>
+
+            <div class="dt-block">
+              <h3>Put/Call Ratio（PCR）<span class="tag-done">已接入</span></h3>
+              <p><strong>两种口径：</strong></p>
+              <ul>
+                <li><strong>OI PCR：</strong>看跌期权未平仓量 / 看涨期权未平仓量，反映市场结构性偏向</li>
+                <li><strong>Volume PCR：</strong>当日成交量口径，反映短期方向情绪</li>
+              </ul>
+              <div class="note-eng">
+                <strong>工程细节：</strong>PCR 可以直接从 options chain 聚合计算，不需要单独接口——但要注意按到期日分组计算近月 PCR 和远月 PCR，两者含义不同。
+              </div>
+            </div>
+
+            <h3 id="onchain-data">4. 链上数据（On-chain）</h3>
+
+            <div class="dt-block">
+              <h3>原始交易 / 事件</h3>
+              <p><strong>DEX Swaps：</strong>Uniswap / Curve / Balancer 等 DEX 的 swap 事件，含 token_in, token_out, amount, sender, recipient</p>
+              <p><strong>ERC-20 Transfer events：</strong>所有代币的转账记录，可追踪大额资金流动</p>
+              <p><strong>接入方式：</strong>直接读节点 RPC（<code>eth_getLogs</code>）或使用 The Graph subgraph</p>
+              <div class="note-eng">
+                <strong>工程细节：</strong>直接读 RPC 延迟最低（秒级），但需要自己 decode ABI，历史查询慢且节点成本高。The Graph 延迟约 1–5 分钟（Arbitrum 区块时间 ~0.25s，subgraph 通常落后几十个区块），适合历史数据和分钟级更新场景。
+              </div>
+            </div>
+
+            <div class="dt-block">
+              <h3>Nansen Smart Money <span class="tag-done">已评估</span></h3>
+              <p><strong>内容：</strong>500+ 标记钱包（机构、DEX 套利者、早期投资者等）的历史链上行为，覆盖 3 年以上</p>
+              <p><strong>用途：</strong>追踪「聪明钱」的仓位变动；提前发现某个代币的机构积累行为</p>
+              <div class="note-eng">
+                <strong>工程细节：</strong>API 按查询量计费，评估阶段要先做样本测试；钱包标签是 Nansen 自己的私有模型，有黑盒成分；主要覆盖以太坊主网，Arbitrum 和 Solana 的覆盖深度较浅。
+              </div>
+            </div>
+
+            <div class="dt-block">
+              <h3>Polymarket 链上成交 <span class="tag-done">已接入，~10M records</span></h3>
+              <p><strong>来源：</strong>The Graph（Arbitrum subgraph）</p>
+              <p><strong>字段：</strong>market_id, outcome_index, side (BUY/SELL), size (USDC), price (0–1), transaction_hash</p>
+              <p><strong>特点：</strong>price 本身是隐含概率，直接反映市场对事件发生概率的定价</p>
+              <div class="note-eng">
+                <strong>工程细节：</strong>The Graph 的 <code>skip</code> 参数上限 5000，必须用 cursor-based pagination（<code>id_gt</code>）翻页。全量 10M 条初始化约需 10000 次请求；增量同步用 ClickHouse 中最新 trade ID 作 checkpoint。Trade ID 格式是 <code>{txHash}-{logIndex}</code>，字典序和时间序大致一致但不完全一致，范围查询要用 <code>timestamp</code> 字段。
+              </div>
+            </div>
+
+            <div class="dt-block">
+              <h3>Exchange Flows（交易所净流入/流出）</h3>
+              <p><strong>内容：</strong>大额资金从链上钱包转入/转出 CEX 的量，是 CEX 卖压的早期信号（转入交易所 → 可能卖出）</p>
+              <p><strong>来源：</strong>CryptoQuant、Glassnode、Nansen</p>
+              <div class="note-eng">
+                <strong>工程细节：</strong>这类数据需要识别交易所的冷热钱包地址，各家数据商的标记方法不同，同一笔转账在不同数据源可能被归类为「交易所流入」或「内部转账」。
+              </div>
+            </div>
+
+            <div class="dt-block">
+              <h3>DeFi 协议数据</h3>
+              <p><strong>TVL（锁仓量）：</strong>各协议的总锁仓资产价值，来自 DeFiLlama API（免费，覆盖最全）</p>
+              <p><strong>Lending Rates：</strong>Aave / Compound 的借贷利率，影响链上杠杆成本，和 CEX funding rate 存在套利关系</p>
+              <p><strong>LP 池组成：</strong>DEX 流动性池的 token 比例和手续费收益，用于 LP 策略</p>
+            </div>
+
+            <div class="dt-block">
+              <h3>链上状态数据</h3>
+              <ul>
+                <li><strong>Active Addresses：</strong>每日活跃地址数，链上活跃度代理，来自 Glassnode</li>
+                <li><strong>Gas Price / Mempool：</strong>实时 gas 价格和 pending 交易量，MEV 策略的核心输入</li>
+                <li><strong>Stablecoin Mint/Burn：</strong>USDT / USDC 的增发和销毁，大额增发通常先于资金流入 CEX</li>
+              </ul>
+            </div>
+
+            <h3 id="macro-data">5. 跨市场 / 宏观数据</h3>
+
+            <div class="dt-block">
+              <h3>CME 比特币期货 <span class="tag-done">已接入</span></h3>
+              <p><strong>来源：</strong>Databento（历史 tick，MBO/MBP 格式，按月购买）</p>
+              <p><strong>用途：</strong>机构持仓分析（CME 的 OI 以机构资金为主）；CME 期货 vs 永续合约的 basis 套利；CoT（Commitment of Traders）报告追踪机构净多空</p>
+              <div class="note-eng">
+                <strong>工程细节：</strong>Databento 的数据格式是 MBO（Market By Order，逐订单级别），需要专门的 schema 解析，和 CEX API 的 JSON 完全不同，不能用同一套 reader 处理。历史数据按月购买，文件大（数 GB），通常先落 S3 再解析入库。
+              </div>
+            </div>
+
+            <div class="dt-block">
+              <h3>XNAS / 股票价格 <span class="tag-done">已接入，post-adjusted</span></h3>
+              <p><strong>内容：</strong>纳斯达克上市公司的股价（主要关注 NASDAQ 指数和 COIN/MSTR 等 crypto 相关标的）</p>
+              <p><strong>用途：</strong>BTC vs NASDAQ 的相关性研究；risk-off 环境下的宏观择时</p>
+              <p><strong>注：</strong>post-adjusted 价格已做拆股/并股调整，适合长期历史分析</p>
+            </div>
+
+            <div class="dt-block">
+              <h3>DXY / 美联储利率 / 国债收益率</h3>
+              <p><strong>DXY（美元指数）：</strong>强势美元通常对应 BTC 承压（risk-off），是宏观择时的重要信号</p>
+              <p><strong>美联储利率 / SOFR：</strong>无风险利率水平影响加密市场的整体风险偏好</p>
+              <p><strong>10Y 美债收益率：</strong>与 BTC 的相关性在 2022–2023 年显著，加息预期上升 → BTC 通常下跌</p>
+              <p><strong>来源：</strong>FRED API（美联储经济数据，免费）、Quandl/Nasdaq Data Link</p>
+            </div>
+
+            <h3 id="altdata">6. 另类 / 社交数据（Alt-data）</h3>
+
+            <div class="dt-block">
+              <h3>LunarCrush <span class="tag-done">已接入，~80M 数据点</span></h3>
+              <p><strong>内容：</strong>3000+ 资产的社交情绪数据（小时粒度），覆盖 3 年以上历史；指标包括 Galaxy Score、AltRank、social_volume、social_engagement</p>
+              <div class="note-eng">
+                <strong>工程细节：</strong>注意幸存者偏差——API 返回的是当前仍存在的资产，已下架小币种的历史数据不完整。社交量有明显的尖峰噪声（bot 刷量、媒体爆炸性报道），直接用原始值做信号需要做 robust normalization。LunarCrush 偶尔会回填历史数据，增量拉取要设计好 upsert 逻辑。
+              </div>
+            </div>
+
+            <div class="dt-block">
+              <h3>Nansen Smart Money <span class="tag-done">已评估</span></h3>
+              <p><strong>内容：</strong>机构级别的链上钱包标签和行为追踪</p>
+              <p>（见上文链上数据部分）</p>
+            </div>
+
+            <div class="dt-block">
+              <h3>Glassnode</h3>
+              <p><strong>内容：</strong>BTC/ETH 的链上宏观指标，包括 MVRV（市值 vs 已实现市值）、SOPR（已实现利润率）、NVT（网络价值 vs 交易量）等</p>
+              <p><strong>用途：</strong>判断市场估值高低的宏观工具，更多用于研究和因子构建，不适合高频信号</p>
+            </div>
+
+            <div class="dt-block">
+              <h3>Santiment / 新闻事件</h3>
+              <p><strong>Santiment：</strong>社交媒体情绪 + 链上开发活动（GitHub commits）+ 鲸鱼交易，覆盖 1500+ 资产</p>
+              <p><strong>新闻事件：</strong>监管动态（SEC 诉讼、ETF 审批）、项目进展（升级、黑客攻击）—— 对短期价格冲击影响大，难以系统化，通常作为事件驱动策略的输入</p>
+            </div>
+
+            <div class="dt-block">
+              <h3>Fear &amp; Greed Index</h3>
+              <p><strong>来源：</strong>Alternative.me API（免费）</p>
+              <p><strong>内容：</strong>0（极度恐惧）到 100（极度贪婪）的综合情绪指数，输入包括波动率、成交量、社交媒体、市值占比等</p>
+              <p><strong>注：</strong>这个指标更像是市场情绪的摘要，而不是原始信号。单独用 Fear &amp; Greed 做策略的回测结论通常过拟合。</p>
+            </div>
+
+            <h2 id="freshness">三、数据新鲜度 vs 用途</h2>
+
+            <p>不同数据类型对延迟的要求差异是量级级别的，决定了接入方式的选择：</p>
+
+            <table class="freshness-table" style="width:100%; border-collapse:collapse; margin: 1rem 0;">
               <thead>
-                <tr style="border-bottom:1px solid var(--border); text-align:left;">
-                  <th style="padding:0.5rem 0.75rem; color:var(--text-muted);">交易所</th>
-                  <th style="padding:0.5rem 0.75rem; color:var(--text-muted);">频率</th>
-                  <th style="padding:0.5rem 0.75rem; color:var(--text-muted);">结算时间点（UTC）</th>
+                <tr>
+                  <th>延迟要求</th>
+                  <th>数据类型</th>
+                  <th>接入方式</th>
+                  <th>典型策略</th>
                 </tr>
               </thead>
               <tbody>
-                <tr style="border-bottom:1px solid var(--border);">
-                  <td style="padding:0.5rem 0.75rem;">Binance</td>
-                  <td style="padding:0.5rem 0.75rem;">每 8 小时</td>
-                  <td style="padding:0.5rem 0.75rem; font-family:var(--font-mono); font-size:0.8rem;">00:00 / 08:00 / 16:00</td>
-                </tr>
-                <tr style="border-bottom:1px solid var(--border);">
-                  <td style="padding:0.5rem 0.75rem;">OKX</td>
-                  <td style="padding:0.5rem 0.75rem;">每 8 小时</td>
-                  <td style="padding:0.5rem 0.75rem; font-family:var(--font-mono); font-size:0.8rem;">00:00 / 08:00 / 16:00</td>
-                </tr>
-                <tr style="border-bottom:1px solid var(--border);">
-                  <td style="padding:0.5rem 0.75rem;">Bybit</td>
-                  <td style="padding:0.5rem 0.75rem;">每小时</td>
-                  <td style="padding:0.5rem 0.75rem; font-family:var(--font-mono); font-size:0.8rem;">每整点</td>
+                <tr>
+                  <td style="font-family:var(--font-mono); font-size:0.82rem;">&lt; 1ms</td>
+                  <td>L2/L3 order book、逐笔 trade</td>
+                  <td>WebSocket 直连，co-location</td>
+                  <td>做市、高频套利</td>
                 </tr>
                 <tr>
-                  <td style="padding:0.5rem 0.75rem;">Hyperliquid</td>
-                  <td style="padding:0.5rem 0.75rem;">每小时</td>
-                  <td style="padding:0.5rem 0.75rem; font-family:var(--font-mono); font-size:0.8rem;">每整点</td>
+                  <td style="font-family:var(--font-mono); font-size:0.82rem;">&lt; 1s</td>
+                  <td>Mark price、liquidation stream</td>
+                  <td>WebSocket</td>
+                  <td>套利、风控触发</td>
+                </tr>
+                <tr>
+                  <td style="font-family:var(--font-mono); font-size:0.82rem;">&lt; 1min</td>
+                  <td>OHLCV、OI、funding rate、taker volume</td>
+                  <td>REST 定时拉 <span class="tag-done">本系统</span></td>
+                  <td>CTA、信号生成、实时监控</td>
+                </tr>
+                <tr>
+                  <td style="font-family:var(--font-mono); font-size:0.82rem;">&lt; 1h</td>
+                  <td>IV surface、社交指标、链上聚合</td>
+                  <td>REST 定时拉</td>
+                  <td>中频策略、波动率交易</td>
+                </tr>
+                <tr>
+                  <td style="font-family:var(--font-mono); font-size:0.82rem;">&lt; 1d</td>
+                  <td>CME CoT、宏观数据、DeFi TVL、Glassnode</td>
+                  <td>REST 日级拉取</td>
+                  <td>因子研究、宏观择时</td>
+                </tr>
+                <tr>
+                  <td style="font-family:var(--font-mono); font-size:0.82rem;">历史</td>
+                  <td>所有数据类型的历史补全</td>
+                  <td>批量入湖（代理池 + 并发）<span class="tag-done">本系统</span></td>
+                  <td>回测、因子挖掘</td>
                 </tr>
               </tbody>
             </table>
 
-            <p>做跨交易所对比时需要注意：Binance 8h 一条记录，Bybit 1h 一条记录，直接对齐会算出假相关。正确做法是把所有交易所的 funding rate 统一归一化为 <strong>annualized rate</strong>（年化）再比较。</p>
+            <h2 id="engineering-summary">四、工程视角的选型原则</h2>
 
-            <h3 id="funding-predicted">已结算 vs 预测资金费率</h3>
-            <p>大多数接口返回的是「已结算」的历史资金费率。但有些策略需要的是「下一期预测资金费率」——在结算前的这段时间，交易所会实时计算当前 funding rate（如果现在结算会是多少），可以从 ticker 或专门的 premium index 接口获取。两者混用会引入信号滞后。</p>
-
-            <h2 id="longshort">多空比：三档的区别</h2>
-
-            <p>「多空比」容易引起混淆，因为实际上有三种口径，含义不同：</p>
-            <ul>
-              <li><strong>全市场账户多空比（Long/Short Account Ratio）</strong>：所有用户中，净多仓账户 vs 净空仓账户的比例。反映散户情绪，噪声大。</li>
-              <li><strong>顶级交易者持仓多空比（Top Trader Position Ratio）</strong>：按持仓规模排名靠前的交易者，其多头持仓 vs 空头持仓的仓位比。反映大资金方向，信号质量更高。</li>
-              <li><strong>顶级交易者账户多空比（Top Trader Account Ratio）</strong>：顶级交易者中，净多账户 vs 净空账户的数量比。和上一个是不同的统计方式。</li>
-            </ul>
-            <p>OKX 还单独提供了 <strong>Taker Buy/Sell Volume</strong>（主动买卖量比），这是另一个维度——反映的是短期的市场主动方向，而不是仓位方向。</p>
-            <p>这几个指标在数据库里一定要用不同的表或字段区分，混在一起后期很难清理。</p>
-
-            <h2 id="options">期权数据：不在公开 API 里的内容</h2>
-
-            <p>以 OKX 为例，公开 API（<code>api/v5</code>）里的期权数据覆盖很有限，很多机构关注的指标——ATM IV、IV skew、implied vs historical vol——只在 <strong>priAPI（私有 API，路径 <code>priapi/v5</code>）</strong> 里提供，这个接口没有官方文档，需要通过抓包或第三方整理的方式发现。</p>
-            <p>这类接口的不稳定性比公开 API 高，参数格式可能随时变，最好做好 schema 版本记录和告警。</p>
-
-            <h2 id="onchain">链上数据：完全不同的工程模式</h2>
-
-            <p>链上数据的接入方式和 CEX REST API 有本质不同，工程模式需要重新设计。</p>
-
-            <h3 id="onchain-ways">三种接入方式的比较</h3>
-
-            <table style="width:100%; border-collapse:collapse; font-size:0.85rem; margin: 1rem 0;">
-              <thead>
-                <tr style="border-bottom:1px solid var(--border); text-align:left;">
-                  <th style="padding:0.5rem 0.75rem; color:var(--text-muted);">方式</th>
-                  <th style="padding:0.5rem 0.75rem; color:var(--text-muted);">延迟</th>
-                  <th style="padding:0.5rem 0.75rem; color:var(--text-muted);">适合场景</th>
-                  <th style="padding:0.5rem 0.75rem; color:var(--text-muted);">主要缺点</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr style="border-bottom:1px solid var(--border);">
-                  <td style="padding:0.5rem 0.75rem; font-weight:500;">The Graph (subgraph)</td>
-                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">1–5 分钟 behind</td>
-                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">历史数据批量、协议聚合数据</td>
-                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">subgraph 自定义查询受限；网络拥塞时延迟更大</td>
-                </tr>
-                <tr style="border-bottom:1px solid var(--border);">
-                  <td style="padding:0.5rem 0.75rem; font-weight:500;">直接 RPC（eth_getLogs 等）</td>
-                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">秒级</td>
-                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">低延迟监控、自定义过滤</td>
-                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">需要自己 decode ABI；节点成本高；历史查询慢</td>
-                </tr>
-                <tr>
-                  <td style="padding:0.5rem 0.75rem; font-weight:500;">第三方 API（Nansen、Dune 等）</td>
-                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">分钟到小时</td>
-                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">标签化数据、聚合分析</td>
-                  <td style="padding:0.5rem 0.75rem; color:var(--text-muted);">成本高；API 覆盖范围有限；不可控</td>
-                </tr>
-              </tbody>
-            </table>
-
-            <h3 id="thegraph">The Graph：分页的坑</h3>
-
-            <p>The Graph 的 GraphQL 接口支持 <code>first</code> 和 <code>skip</code> 分页，但 <code>skip</code> 有上限（通常是 5000），超过后返回空结果而不报错。正确的方式是用 <strong>cursor-based pagination</strong>：以上一批最后一条记录的 ID 作为下一次查询的起始点。</p>
-
-            <span class="code-label">The Graph cursor 分页（避免 skip 上限）</span>
-            <pre><code class="language-python">QUERY = """
-query GetTrades($lastId: ID!, $first: Int!) {
-  trades(
-    first: $first
-    where: { id_gt: $lastId }
-    orderBy: id
-    orderDirection: asc
-  ) {
-    id
-    timestamp
-    market
-    outcome
-    amount
-    price
-  }
-}
-"""
-
-def fetch_all_trades(subgraph_url: str, batch_size: int = 1000) -> list:
-    last_id = ""   # 空字符串在 GraphQL ID 比较中小于所有实际 ID
-    results = []
-
-    while True:
-        resp = requests.post(subgraph_url, json={
-            "query": QUERY,
-            "variables": {"lastId": last_id, "first": batch_size},
-        })
-        batch = resp.json()["data"]["trades"]
-        if not batch:
-            break
-
-        results.extend(batch)
-        last_id = batch[-1]["id"]   # 下一页从这里开始
-
-    return results</code></pre>
-
-            <h3 id="subgraph-lag">Subgraph 的延迟与一致性</h3>
-            <p>Arbitrum subgraph 通常比链上最新区块落后 1–5 分钟，但在网络拥塞或 The Graph 节点同步慢时可能更长。实时监控场景下，查询前可以先检查 <code>_meta.block.number</code> 和当前链上高度的差，超过阈值就告警。</p>
-
-            <span class="code-label">检查 subgraph 同步状态</span>
-            <pre><code class="language-python">META_QUERY = """
-{ _meta { block { number } } }
-"""
-
-def get_subgraph_lag(subgraph_url: str, rpc_url: str) -> int:
-    """返回 subgraph 落后链上多少个区块。"""
-    subgraph_block = requests.post(
-        subgraph_url, json={"query": META_QUERY}
-    ).json()["data"]["_meta"]["block"]["number"]
-
-    chain_block = int(
-        requests.post(rpc_url, json={
-            "jsonrpc": "2.0", "method": "eth_blockNumber",
-            "params": [], "id": 1,
-        }).json()["result"], 16
-    )
-
-    return chain_block - subgraph_block</code></pre>
-
-            <h3 id="polymarket">Polymarket 实战：~10M 条记录入库</h3>
-            <p>Polymarket 在 Arbitrum 上运行，成交记录通过 The Graph 的子图暴露。批量拉取 10M 条记录时几个关键点：</p>
-            <ul>
-              <li>The Graph 单次查询 <code>first</code> 上限是 1000，必须循环分页</li>
-              <li>Arbitrum 上的 block time 约 0.25 秒，所以 ID 排序大致等于时间排序，但不完全精确——同一区块里的多笔交易 ID 不连续</li>
-              <li>入库前先落 S3 Parquet（按天分区），再批量写 ClickHouse；避免网络中断导致重复从头拉取</li>
-              <li>ClickHouse 的 <code>ReplacingMergeTree</code> 以 transaction hash + log index 作为唯一键，保证幂等写入</li>
-            </ul>
-
-            <h2 id="altdata">另类数据：质量参差不齐</h2>
-
-            <p>社交和链上另类数据的工程复杂度低于 CEX 数据，但数据质量问题更突出。</p>
-
-            <h3 id="lunarchrush">LunarCrush：80M 数据点背后的问题</h3>
-            <p>LunarCrush 提供 3000+ 资产的社交情绪数据（小时粒度），总量约 80M 数据点，覆盖 3 年以上历史。这个数据量本身不大，入库不是难点——难点在于数据质量：</p>
-            <ul>
-              <li><strong>资产覆盖的幸存者偏差</strong>：当前 API 返回的是现在仍存在的资产，历史上已经下架的小币种数据不完整。做回测时要注意。</li>
-              <li><strong>社交量突变</strong>：某些时间段会有异常尖峰（可能是 bot 刷量、媒体爆炸性报道），直接用原始值做信号噪声大，通常需要做 robust normalization。</li>
-              <li><strong>历史数据重算</strong>：LunarCrush 偶尔会回填或修正历史数据，增量拉取时要设计好 upsert 逻辑。</li>
-            </ul>
-
-            <h3 id="nansen">Nansen Smart Money：成本与覆盖范围的权衡</h3>
-            <p>Nansen 提供 500+ 标记钱包（机构、聪明钱、交易所等）的历史链上行为，数据深度 3 年以上。问题在于：</p>
-            <ul>
-              <li>API 按查询量计费，历史数据全量拉取成本不低，评估阶段要先做样本测试</li>
-              <li>钱包标签是 Nansen 自己打的，有黑盒成分；同一个地址可能同时有多个标签，使用时要明确选哪个维度</li>
-              <li>覆盖的链主要是以太坊主网，Arbitrum 和 Solana 的覆盖深度较浅</li>
-            </ul>
-
-            <h2 id="macro">跨市场数据：CME 与传统金融的接口差异</h2>
-
-            <p>CME 的 Bitcoin/Ethereum 期货数据对量化公司有两个用途：一是研究机构资金对市场的影响（CME 的 OI 和 Coinbase 的 OI 联动），二是做 BTC CME 期货与永续合约的 basis 交易。</p>
-            <p>和 crypto 接口相比，CME 数据的获取方式更传统：通过 Databento 这类历史 tick 数据提供商按月购买，格式是 MBO（Market By Order）或 MBP（Market By Price）的压缩文件，需要用专门的 schema 解析。接口风格、数据格式、时间戳精度都和 CEX API 完全不同，不能用同一套 reader 处理。</p>
-
-            <h2 id="summary">小结：选接入方式前先问这三个问题</h2>
-
-            <p>面对一个新数据源，先想清楚三件事：</p>
+            <p>面对一个新数据源，工程上先想清楚三件事：</p>
             <ol>
-              <li><strong>需要多新鲜？</strong> 分钟级用 REST 定时拉就够；秒级或更快要考虑 WebSocket 或流式接入；链上数据要接受分钟级延迟</li>
-              <li><strong>历史数据要多深？</strong> 交易所一般只保留最近几个月到一年的历史，更早的要找第三方归档（Databento）或接受数据不完整</li>
-              <li><strong>数据质量如何校验？</strong> K 线可以用成交量归零检测、相邻时间戳连续性检测；链上数据要核对 subgraph 区块高度；alt-data 要设计异常值检测</li>
+              <li><strong>新鲜度要求</strong>：分钟级 REST 够还是需要 WebSocket；链上数据接受 1–5 分钟 subgraph 延迟还是需要直接读 RPC</li>
+              <li><strong>历史深度</strong>：交易所 API 通常只保留最近几个月到一年，更早的历史需要找专业归档来源（Databento）或接受数据不完整</li>
+              <li><strong>质量校验策略</strong>：K 线用时间戳连续性和成交量异常检测；资金费率用结算时间对齐；链上数据用 subgraph lag 监控和价格边界检验；alt-data 警惕幸存者偏差和历史回填</li>
             </ol>
 
             <blockquote style="border-left: 3px solid var(--border); padding-left: 1rem; color: var(--text-muted); margin: 2rem 0;">
-              Crypto 量化的数据工程不只是「拉 K 线」——衍生品统计数据、期权波动率、链上交易记录、另类数据，每一类都有独立的接入方式和工程细节。真正的难点不是拿到数据，而是知道数据什么时候不对。
+              真正的难点不是「能不能拿到数据」，而是「知道数据什么时候是错的」。
             </blockquote>
 
-          </div><!-- /article-body -->
+          </div>
         </article>
 
         <nav class="series-nav" aria-label="系列导航">
@@ -358,35 +487,27 @@ def get_subgraph_lag(subgraph_url: str, rpc_url: str) -> int:
           </a>
         </nav>
 
-      </div><!-- /article-content -->
+      </div>
 
       <aside class="article-toc">
         <div class="toc">
           <div class="toc-title">目录</div>
           <ul class="toc-list">
-            <li><a href="#map">数据全景</a></li>
-            <li><a href="#ohlcv">K 线（OHLCV）</a></li>
-            <li class="toc-h3"><a href="#ohlcv-window">历史窗口限制</a></li>
-            <li class="toc-h3"><a href="#ohlcv-direction">分页方向不统一</a></li>
-            <li class="toc-h3"><a href="#ohlcv-ts">时间戳边界</a></li>
-            <li><a href="#funding">资金费率</a></li>
-            <li class="toc-h3"><a href="#funding-timing">结算时间不对齐</a></li>
-            <li class="toc-h3"><a href="#funding-predicted">已结算 vs 预测</a></li>
-            <li><a href="#longshort">多空比：三档区别</a></li>
-            <li><a href="#options">期权数据</a></li>
-            <li><a href="#onchain">链上数据</a></li>
-            <li class="toc-h3"><a href="#onchain-ways">三种接入方式</a></li>
-            <li class="toc-h3"><a href="#thegraph">The Graph 分页坑</a></li>
-            <li class="toc-h3"><a href="#subgraph-lag">Subgraph 延迟</a></li>
-            <li class="toc-h3"><a href="#polymarket">Polymarket 实战</a></li>
-            <li><a href="#altdata">另类数据</a></li>
-            <li><a href="#macro">CME / 跨市场数据</a></li>
-            <li><a href="#summary">小结</a></li>
+            <li><a href="#strategies">一、Crypto Quant 在做什么</a></li>
+            <li><a href="#data-map">二、数据分类全景</a></li>
+            <li class="toc-h3"><a href="#market-data">1. 市场数据（CEX）</a></li>
+            <li class="toc-h3"><a href="#derivatives-data">2. 衍生品数据</a></li>
+            <li class="toc-h3"><a href="#options-data">3. 期权数据</a></li>
+            <li class="toc-h3"><a href="#onchain-data">4. 链上数据</a></li>
+            <li class="toc-h3"><a href="#macro-data">5. 跨市场 / 宏观</a></li>
+            <li class="toc-h3"><a href="#altdata">6. 另类 / 社交数据</a></li>
+            <li><a href="#freshness">三、数据新鲜度 vs 用途</a></li>
+            <li><a href="#engineering-summary">四、工程选型原则</a></li>
           </ul>
         </div>
       </aside>
 
-    </div><!-- /article-layout -->
+    </div>
   </main>
 
   <footer class="site-footer">
